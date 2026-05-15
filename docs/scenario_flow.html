@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pyteda · how a Scenario is built</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,800;1,9..144,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0d1117;
+    --bg-2:      #161b22;
+    --bg-3:      #1f262d;
+    --fg:        #e6e1d6;
+    --fg-faint:  #8b8475;
+    --rule:      #2a3038;
+
+    --hot:       #ff6b3d;   /* Phase 1 — synth + spinup */
+    --hot-bg:    #2c1610;
+    --teal:      #2dd4bf;   /* Phase 2 — xb */
+    --teal-bg:   #0a201d;
+    --gold:      #f5c451;   /* Phase 3 — ensemble */
+    --gold-bg:   #2a210a;
+    --mauve:     #c084fc;   /* Truth sync */
+    --mauve-bg:  #1d152a;
+    --sky:       #7ec0ee;   /* Observations loop */
+    --sky-bg:    #101e2a;
+
+    --font-display: "Fraunces", Georgia, serif;
+    --font-mono: "IBM Plex Mono", "JetBrains Mono", monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  /* film-like grain */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    background-image:
+      repeating-radial-gradient(circle at 23% 17%, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px),
+      repeating-radial-gradient(circle at 71% 83%, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px);
+    mix-blend-mode: overlay;
+    opacity: 0.7;
+  }
+
+  .page {
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 64px 56px 120px;
+    position: relative;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 48px;
+    align-items: end;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 36px;
+    margin-bottom: 56px;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    color: var(--hot);
+    text-transform: uppercase;
+    margin: 0 0 14px;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-style: italic;
+    font-size: 64px;
+    line-height: 0.95;
+    letter-spacing: -0.025em;
+    margin: 0 0 14px;
+  }
+  h1 .accent {
+    font-style: normal;
+    font-weight: 400;
+    color: var(--fg-faint);
+  }
+
+  .deck {
+    font-size: 20px;
+    line-height: 1.4;
+    color: var(--fg);
+    max-width: 740px;
+    font-weight: 400;
+  }
+  .deck code {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    background: var(--bg-2);
+    padding: 1px 7px;
+    border-radius: 3px;
+    color: var(--gold);
+  }
+
+  .header-meta {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-faint);
+    text-align: right;
+    line-height: 1.7;
+    letter-spacing: 0.04em;
+  }
+  .header-meta b { color: var(--fg); font-weight: 500; }
+
+  /* ---------- The Big Diagram ---------- */
+  .diagram-wrap {
+    background: var(--bg-2);
+    border: 1px solid var(--rule);
+    padding: 32px 32px 40px;
+    margin-bottom: 56px;
+    position: relative;
+  }
+  .diagram-wrap > .corner {
+    position: absolute;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--fg-faint);
+    text-transform: uppercase;
+  }
+  .diagram-wrap > .corner.tl { top: 14px; left: 18px; }
+  .diagram-wrap > .corner.tr { top: 14px; right: 18px; }
+
+  svg.flow {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-top: 28px;
+  }
+  svg.flow text {
+    font-family: var(--font-mono);
+    fill: var(--fg);
+  }
+  .lbl-title {
+    font-family: var(--font-display) !important;
+    font-style: italic;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .lbl-sub  { font-size: 10px; fill: var(--fg-faint); letter-spacing: 0.1em; text-transform: uppercase; }
+  .lbl-code { font-size: 11px; }
+  .lbl-tag  { font-size: 10px; letter-spacing: 0.06em; }
+  .arrow    { fill: none; stroke-width: 1.6; }
+  .arrow-faint { fill: none; stroke: var(--fg-faint); stroke-width: 1.2; stroke-dasharray: 4 4; }
+
+  /* ---------- Sections ---------- */
+  section.phase {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 56px;
+    padding: 32px 0;
+    border-top: 1px solid var(--rule);
+  }
+  section.phase:first-of-type { border-top: none; padding-top: 0; }
+
+  .phase-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .phase h2 {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 600;
+    font-size: 32px;
+    margin: 0;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+  }
+  .phase .intro {
+    color: var(--fg);
+    font-size: 16px;
+    margin-top: 16px;
+    line-height: 1.55;
+  }
+
+  /* phase variants */
+  .phase.p-hot   .phase-tag { color: var(--hot); }
+  .phase.p-teal  .phase-tag { color: var(--teal); }
+  .phase.p-gold  .phase-tag { color: var(--gold); }
+  .phase.p-mauve .phase-tag { color: var(--mauve); }
+  .phase.p-sky   .phase-tag { color: var(--sky); }
+
+  .phase-body {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  /* recipe-card showing the equation/code */
+  .step-card {
+    background: var(--bg-3);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--rule);
+    padding: 18px 22px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--fg);
+    line-height: 1.7;
+  }
+  .step-card .input {
+    color: var(--fg-faint);
+    margin-bottom: 4px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .step-card .op {
+    color: var(--fg-faint);
+    margin: 6px 0;
+    padding-left: 14px;
+    border-left: 2px dashed var(--rule);
+  }
+  .step-card .out {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--rule);
+    font-size: 13px;
+  }
+  .step-card .out::before { content: "→ "; color: var(--fg-faint); }
+
+  .phase.p-hot   .step-card { border-left-color: var(--hot); }
+  .phase.p-teal  .step-card { border-left-color: var(--teal); }
+  .phase.p-gold  .step-card { border-left-color: var(--gold); }
+  .phase.p-mauve .step-card { border-left-color: var(--mauve); }
+  .phase.p-sky   .step-card { border-left-color: var(--sky); }
+
+  .step-card .var-x0r  { color: var(--hot); }
+  .step-card .var-xb   { color: var(--teal); }
+  .step-card .var-Xb   { color: var(--gold); }
+  .step-card .var-tr   { color: var(--mauve); }
+  .step-card .var-y    { color: var(--sky); }
+  .step-card .var-rng  { color: var(--fg-faint); font-style: italic; }
+
+  /* aside notes */
+  .note {
+    border: 1px solid var(--rule);
+    padding: 12px 16px;
+    font-size: 14px;
+    color: var(--fg-faint);
+    background: rgba(255,255,255,0.015);
+    line-height: 1.5;
+  }
+  .note b { color: var(--fg); font-weight: 600; }
+  .note .label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--fg);
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  /* ---------- RNG splitting box ---------- */
+  .rng-split {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 56px;
+    padding: 32px 0;
+    border-top: 1px solid var(--rule);
+    margin-top: 32px;
+  }
+  .rng-streams {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .rng-stream {
+    border: 1px solid var(--rule);
+    padding: 14px 16px;
+    background: var(--bg-2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  .rng-stream .name { font-size: 14px; color: var(--fg); font-weight: 600; margin-bottom: 4px; }
+  .rng-stream .role { color: var(--fg-faint); }
+  .rng-stream.s-hot   { border-top: 3px solid var(--hot); }
+  .rng-stream.s-teal  { border-top: 3px solid var(--teal); }
+  .rng-stream.s-gold  { border-top: 3px solid var(--gold); }
+  .rng-stream.s-sky   { border-top: 3px solid var(--sky); }
+
+  /* ---------- Footer ---------- */
+  footer {
+    margin-top: 80px;
+    padding-top: 32px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 18px;
+    letter-spacing: 0.06em;
+  }
+  footer .signoff {
+    font-style: italic;
+    font-family: var(--font-display);
+    font-size: 14px;
+    color: var(--fg);
+    letter-spacing: 0;
+  }
+
+  /* small screens */
+  @media (max-width: 820px) {
+    .page { padding: 32px 22px 60px; }
+    h1 { font-size: 42px; }
+    section.phase, .rng-split {
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+    .rng-streams { grid-template-columns: 1fr 1fr; }
+    .header-meta { text-align: left; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ============================================================
+     HEADER
+     ============================================================ -->
+<header>
+  <div>
+    <p class="eyebrow">pyteda · scenario.generate</p>
+    <h1>How a <span class="accent">Scenario</span><br>is forged.</h1>
+    <p class="deck">
+      Three phases build the truth and the initial ensemble; a sixth step samples the observations.
+      Every random draw lives in a separate RNG stream so seeds are reproducible to the bit.
+      What follows is the actual recipe inside <code>Scenario.generate</code>.
+    </p>
+  </div>
+  <div class="header-meta">
+    <b>seed splits into four streams</b><br>
+    rng_op &nbsp;·&nbsp; rng_xb &nbsp;·&nbsp; rng_noise &nbsp;·&nbsp; rng_ens<br><br>
+    <b>artifacts produced</b><br>
+    x0_ref &nbsp;·&nbsp; xb &nbsp;·&nbsp; X_b<br>
+    truth_trajectory &nbsp;·&nbsp; observations
+  </div>
+</header>
+
+<!-- ============================================================
+     THE BIG DIAGRAM (SVG)
+     ============================================================ -->
+<div class="diagram-wrap">
+  <span class="corner tl">FIG · 01</span>
+  <span class="corner tr">flow / time →</span>
+
+  <svg class="flow" viewBox="0 0 1400 560" xmlns="http://www.w3.org/2000/svg" aria-label="Scenario generation flow">
+    <defs>
+      <marker id="ah-hot"   viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#ff6b3d"/>
+      </marker>
+      <marker id="ah-teal"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#2dd4bf"/>
+      </marker>
+      <marker id="ah-gold"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#f5c451"/>
+      </marker>
+      <marker id="ah-mauve" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#c084fc"/>
+      </marker>
+      <marker id="ah-sky"   viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#7ec0ee"/>
+      </marker>
+      <marker id="ah-faint" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#8b8475"/>
+      </marker>
+    </defs>
+
+    <!-- ============= TIME AXIS ============= -->
+    <line x1="60" y1="510" x2="1340" y2="510" stroke="#2a3038" stroke-width="1"/>
+    <text x="60" y="535" class="lbl-sub">t = 0</text>
+    <text x="290" y="535" class="lbl-sub" text-anchor="middle">t = T₁ = spinup_truth</text>
+    <text x="540" y="535" class="lbl-sub" text-anchor="middle">t = T₁ + T₂</text>
+    <text x="900" y="535" class="lbl-sub" text-anchor="middle">t = T₁ + T₂ + T₃ &nbsp; (truth aligned)</text>
+    <text x="1340" y="535" class="lbl-sub" text-anchor="end">+ end_time</text>
+
+    <!-- vertical hash marks on time axis -->
+    <line x1="60"   y1="505" x2="60"   y2="515" stroke="#2a3038"/>
+    <line x1="290"  y1="505" x2="290"  y2="515" stroke="#2a3038"/>
+    <line x1="540"  y1="505" x2="540"  y2="515" stroke="#2a3038"/>
+    <line x1="900"  y1="505" x2="900"  y2="515" stroke="#2a3038"/>
+    <line x1="1340" y1="505" x2="1340" y2="515" stroke="#2a3038"/>
+
+    <!-- ===================================================
+         ROW 1 — PHASE 1: synth IC → x0_ref
+         =================================================== -->
+    <text x="60" y="60" fill="#ff6b3d" class="lbl-tag">PHASE 1 · reference</text>
+
+    <!-- Synth IC node -->
+    <circle cx="80" cy="120" r="12" fill="none" stroke="#ff6b3d" stroke-width="1.5"/>
+    <text x="80" y="124" text-anchor="middle" font-size="11" fill="#ff6b3d">x₀</text>
+    <text x="80" y="160" text-anchor="middle" class="lbl-sub">model.get_initial_condition()</text>
+
+    <!-- arrow + spinup_truth label -->
+    <path class="arrow" stroke="#ff6b3d" d="M 100 120 L 270 120" marker-end="url(#ah-hot)"/>
+    <text x="185" y="108" text-anchor="middle" font-size="11" fill="#ff6b3d">propagate(T₁)</text>
+    <text x="185" y="138" text-anchor="middle" class="lbl-sub">model time advances by spinup_truth</text>
+
+    <!-- x0_ref node -->
+    <rect x="270" y="100" width="40" height="40" fill="#2c1610" stroke="#ff6b3d" stroke-width="1.5"/>
+    <text x="290" y="125" text-anchor="middle" font-size="13" fill="#ff6b3d" font-weight="600">x₀ʳᵉᶠ</text>
+    <text x="290" y="170" text-anchor="middle" class="lbl-sub">on the model attractor</text>
+
+    <!-- ===================================================
+         ROW 2 — PHASE 2: x0_ref + pert → xb
+         =================================================== -->
+    <text x="350" y="60" fill="#2dd4bf" class="lbl-tag">PHASE 2 · ensemble centre</text>
+
+    <!-- branching down from x0_ref to perturbation -->
+    <path class="arrow" stroke="#ff6b3d" d="M 290 140 L 290 200 L 360 200" marker-end="url(#ah-hot)"/>
+
+    <!-- pert_xb plus -->
+    <circle cx="380" cy="200" r="14" fill="#0a201d" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="380" y="205" text-anchor="middle" font-size="14" fill="#2dd4bf">+</text>
+    <text x="380" y="244" text-anchor="middle" class="lbl-sub">pert_xb · 𝒩(0,I)</text>
+    <text x="380" y="258" text-anchor="middle" class="lbl-sub" fill="#2dd4bf">↑ from rng_xb</text>
+
+    <!-- arrow to propagate -->
+    <path class="arrow" stroke="#2dd4bf" d="M 396 200 L 525 200" marker-end="url(#ah-teal)"/>
+    <text x="460" y="190" text-anchor="middle" font-size="11" fill="#2dd4bf">propagate(T₂)</text>
+
+    <!-- xb node -->
+    <rect x="525" y="180" width="40" height="40" fill="#0a201d" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="545" y="205" text-anchor="middle" font-size="13" fill="#2dd4bf" font-weight="600">xᵇ</text>
+    <text x="545" y="244" text-anchor="middle" class="lbl-sub">chaos-driven separation</text>
+    <text x="545" y="258" text-anchor="middle" class="lbl-sub">||xᵇ − x₀ʳᵉᶠ|| matters</text>
+
+    <!-- ===================================================
+         ROW 3 — PHASE 3: xb + per-member pert → X_b columns
+         =================================================== -->
+    <text x="600" y="60" fill="#f5c451" class="lbl-tag">PHASE 3 · initial ensemble</text>
+
+    <!-- branching down from xb to per-member perts -->
+    <path class="arrow" stroke="#2dd4bf" d="M 545 220 L 545 290 L 620 290" marker-end="url(#ah-teal)"/>
+
+    <!-- ensemble plus -->
+    <circle cx="640" cy="290" r="14" fill="#2a210a" stroke="#f5c451" stroke-width="1.5"/>
+    <text x="640" y="295" text-anchor="middle" font-size="14" fill="#f5c451">+</text>
+    <text x="640" y="334" text-anchor="middle" class="lbl-sub">pert_ensemble · 𝒩(0,I)</text>
+    <text x="640" y="348" text-anchor="middle" class="lbl-sub">×N members &nbsp; · &nbsp; rng_ens</text>
+
+    <!-- arrow to per-member propagate -->
+    <path class="arrow" stroke="#f5c451" d="M 656 290 L 805 290" marker-end="url(#ah-gold)"/>
+    <text x="730" y="280" text-anchor="middle" font-size="11" fill="#f5c451">propagate(T₃)</text>
+    <text x="730" y="306" text-anchor="middle" class="lbl-sub">independently per member</text>
+
+    <!-- X_b stack of columns -->
+    <g>
+      <rect x="805" y="270" width="40" height="40" fill="#2a210a" stroke="#f5c451" stroke-width="1.5"/>
+      <rect x="813" y="262" width="40" height="40" fill="#2a210a" stroke="#f5c451" stroke-width="1.5"/>
+      <rect x="821" y="254" width="40" height="40" fill="#2a210a" stroke="#f5c451" stroke-width="1.5"/>
+      <text x="841" y="280" text-anchor="middle" font-size="13" fill="#f5c451" font-weight="600">Xᵇ</text>
+      <text x="843" y="334" text-anchor="middle" class="lbl-sub">shape (n, N_ens)</text>
+      <text x="843" y="348" text-anchor="middle" class="lbl-sub">centred on xᵇ</text>
+    </g>
+
+    <!-- ===================================================
+         ROW 4 — TRUTH SYNC: x0_ref → propagate(T2+T3) → truth[0]
+         =================================================== -->
+    <text x="900" y="60" fill="#c084fc" class="lbl-tag">TRUTH SYNCHRONISATION</text>
+
+    <!-- arrow from x0_ref bypassing to truth[0] -->
+    <path class="arrow-faint" stroke="#c084fc" d="M 310 130 Q 600 80 1000 130" marker-end="url(#ah-mauve)"/>
+    <text x="640" y="80" text-anchor="middle" font-size="11" fill="#c084fc">propagate(T₂ + T₃) &nbsp; · &nbsp; same physics, no perturbation</text>
+
+    <!-- truth[0] -->
+    <rect x="1000" y="110" width="40" height="40" fill="#1d152a" stroke="#c084fc" stroke-width="1.5"/>
+    <text x="1020" y="135" text-anchor="middle" font-size="12" fill="#c084fc" font-weight="600">x*₀</text>
+    <text x="1020" y="172" text-anchor="middle" class="lbl-sub">truth[0]</text>
+    <text x="1020" y="186" text-anchor="middle" class="lbl-sub">aligned with Xᵇ time</text>
+
+    <!-- ===================================================
+         ROW 5 — OBSERVATION LOOP
+         =================================================== -->
+    <text x="1080" y="60" fill="#7ec0ee" class="lbl-tag">OBSERVATION LOOP · k = 0..K−1</text>
+
+    <!-- chain of truth states -->
+    <g>
+      <rect x="1080" y="110" width="40" height="40" fill="#1d152a" stroke="#c084fc" stroke-width="1.2"/>
+      <text x="1100" y="135" text-anchor="middle" font-size="11" fill="#c084fc">x*₁</text>
+      <rect x="1160" y="110" width="40" height="40" fill="#1d152a" stroke="#c084fc" stroke-width="1.2"/>
+      <text x="1180" y="135" text-anchor="middle" font-size="11" fill="#c084fc">x*₂</text>
+      <text x="1240" y="135" text-anchor="middle" font-size="14" fill="#8b8475">···</text>
+      <rect x="1280" y="110" width="40" height="40" fill="#1d152a" stroke="#c084fc" stroke-width="1.2"/>
+      <text x="1300" y="135" text-anchor="middle" font-size="10" fill="#c084fc">x*ₖ₋₁</text>
+    </g>
+    <!-- arrows between them -->
+    <path class="arrow" stroke="#c084fc" d="M 1040 130 L 1080 130" marker-end="url(#ah-mauve)"/>
+    <path class="arrow" stroke="#c084fc" d="M 1120 130 L 1160 130" marker-end="url(#ah-mauve)"/>
+    <path class="arrow" stroke="#c084fc" d="M 1200 130 L 1230 130" marker-end="url(#ah-mauve)"/>
+    <path class="arrow" stroke="#c084fc" d="M 1255 130 L 1280 130" marker-end="url(#ah-mauve)"/>
+    <text x="1140" y="100" text-anchor="middle" font-size="9" fill="#8b8475">propagate(obs_freq)</text>
+
+    <!-- the y_k samples below the chain -->
+    <g>
+      <text x="1100" y="220" text-anchor="middle" font-size="11" fill="#7ec0ee">y₁</text>
+      <text x="1180" y="220" text-anchor="middle" font-size="11" fill="#7ec0ee">y₂</text>
+      <text x="1300" y="220" text-anchor="middle" font-size="10" fill="#7ec0ee">yₖ₋₁</text>
+      <path class="arrow" stroke="#7ec0ee" d="M 1100 152 L 1100 208" marker-end="url(#ah-sky)"/>
+      <path class="arrow" stroke="#7ec0ee" d="M 1180 152 L 1180 208" marker-end="url(#ah-sky)"/>
+      <path class="arrow" stroke="#7ec0ee" d="M 1300 152 L 1300 208" marker-end="url(#ah-sky)"/>
+      <text x="1200" y="190" text-anchor="middle" class="lbl-sub" fill="#7ec0ee">opₖ(x*ₖ) + 𝒩(0, R)</text>
+      <text x="1200" y="252" text-anchor="middle" class="lbl-sub">rng_op · rng_noise</text>
+    </g>
+
+    <!-- ===================================================
+         FRAMING TITLES
+         =================================================== -->
+    <text x="160" y="395" class="lbl-title" fill="#ff6b3d">attractor warm-up</text>
+    <text x="450" y="395" class="lbl-title" fill="#2dd4bf">drift the centre</text>
+    <text x="730" y="430" class="lbl-title" fill="#f5c451">spread the cloud</text>
+    <text x="1020" y="395" class="lbl-title" fill="#c084fc">align the clock</text>
+    <text x="1200" y="305" class="lbl-title" fill="#7ec0ee">sample reality</text>
+
+  </svg>
+</div>
+
+<!-- ============================================================
+     RNG SPLITTING
+     ============================================================ -->
+<div class="rng-split">
+  <div>
+    <p class="phase-tag" style="color: var(--fg-faint)">Master seed</p>
+    <h2 style="font-family:var(--font-display);font-style:italic;font-weight:600;font-size:30px;margin:0">spawn(4) ⇒ four streams</h2>
+    <p class="intro" style="margin-top:14px;color:var(--fg-faint)">
+      Every randomness in the diagram comes from one of four independent generators
+      derived from the master <code style="font-family:var(--font-mono);background:var(--bg-2);padding:1px 5px;border-radius:2px">seed</code> via <code style="font-family:var(--font-mono);background:var(--bg-2);padding:1px 5px;border-radius:2px">np.random.SeedSequence(seed).spawn(4)</code>.
+      Reusing only some streams (e.g. fixing <b>rng_xb</b> while varying <b>rng_op</b>) is how scenarios share an ensemble centre but vary their observation network.
+    </p>
+  </div>
+  <div class="rng-streams">
+    <div class="rng-stream s-hot">
+      <div class="name">rng_op</div>
+      <div class="role">selects / builds the observation operator at every step</div>
+    </div>
+    <div class="rng-stream s-teal">
+      <div class="name">rng_xb</div>
+      <div class="role">draws the perturbation for Phase 2 (xᵇ construction)</div>
+    </div>
+    <div class="rng-stream s-gold">
+      <div class="name">rng_ens</div>
+      <div class="role">draws per-member perturbations for Phase 3 (Xᵇ)</div>
+    </div>
+    <div class="rng-stream s-sky">
+      <div class="name">rng_noise</div>
+      <div class="role">samples observation noise 𝒩(0, R) at every step k</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     PHASE-BY-PHASE BREAKDOWN
+     ============================================================ -->
+<section class="phase p-hot">
+  <div>
+    <p class="phase-tag">Phase 01 · reference</p>
+    <h2>The synthetic IC walks onto the&nbsp;attractor.</h2>
+    <p class="intro">
+      Models start cold. <b>Lorenz96</b> starts from a random vector; <b>QGModel</b> starts from a Fourier IC; <b>SWEModel</b> starts from Williamson's solid-body rotation plus Rossby perturbations. None of these are physically realistic states.
+      A long propagation lets transients die and the trajectory settle on the model attractor — the climatology you actually want to assimilate against.
+    </p>
+  </div>
+  <div class="phase-body">
+    <div class="step-card">
+      <div class="input">input</div>
+      x₀ = model.get_initial_condition()
+      <div class="op">propagate over t ∈ [0, T₁] &nbsp; with &nbsp; T₁ = spinup_truth</div>
+      <div class="out"><span class="var-x0r">x₀ʳᵉᶠ</span> = model.propagate(x₀, [0, T₁])</div>
+    </div>
+    <div class="note">
+      <span class="label">why it matters</span>
+      Without spinup, the truth carries noise from the synthetic IC. Filters then look great by accident — they are correcting an unphysical state, not climatological dynamics. <b>Skip this phase</b> by passing <code style="font-family:var(--font-mono)">x0_ref=...</code> from a previous run.
+    </div>
+  </div>
+</section>
+
+<section class="phase p-teal">
+  <div>
+    <p class="phase-tag">Phase 02 · ensemble centre</p>
+    <h2>A small kick. Then chaos amplifies it.</h2>
+    <p class="intro">
+      A real-world background carries accumulated forecast error. To imitate that, we perturb <code style="font-family:var(--font-mono)">x₀ʳᵉᶠ</code> with a <em>small</em> Gaussian kick and let the model run for <code style="font-family:var(--font-mono)">spinup_xb</code>. Chaotic divergence does the rest — the result <code style="font-family:var(--font-mono)">xᵇ</code> sits at a different point on the attractor than the truth will.
+      The distance ‖xᵇ − truth[0]‖ is the realistic background error the filter must correct.
+    </p>
+  </div>
+  <div class="phase-body">
+    <div class="step-card">
+      <div class="input">input</div>
+      <span class="var-x0r">x₀ʳᵉᶠ</span> &nbsp; <span class="var-rng">// from Phase 1</span>
+      <div class="op">add &nbsp; pert_xb · 𝒩(0, I)  &nbsp;<span class="var-rng">// from rng_xb</span></div>
+      <div class="op">propagate over t ∈ [T₁, T₁ + T₂] &nbsp; with &nbsp; T₂ = spinup_xb</div>
+      <div class="out"><span class="var-xb">xᵇ</span> = model.propagate(x₀ʳᵉᶠ + pert_xb · ε, [0, T₂])</div>
+    </div>
+    <div class="note">
+      <span class="label">tuning hint</span>
+      <code style="font-family:var(--font-mono)">pert_xb</code> sets the seed; <code style="font-family:var(--font-mono)">spinup_xb</code> sets how much chaos amplifies it. Their product determines ‖xᵇ − x₀ʳᵉᶠ‖. For Lorenz96 this saturates fast (hours of model time); for QG and SWE it can take days. <b>Skip this phase</b> by passing <code style="font-family:var(--font-mono)">xb=...</code>.
+    </div>
+  </div>
+</section>
+
+<section class="phase p-gold">
+  <div>
+    <p class="phase-tag">Phase 03 · initial ensemble</p>
+    <h2>Disperse N members around xᵇ.</h2>
+    <p class="intro">
+      The filter needs uncertainty around the centre, not just one state. Each ensemble member is born by perturbing <code style="font-family:var(--font-mono)">xᵇ</code> independently and propagating it for a short time so the perturbations enter the model's slow manifold. The result <code style="font-family:var(--font-mono)">Xᵇ</code> is the columnar matrix of N members at the same model time as the truth.
+    </p>
+  </div>
+  <div class="phase-body">
+    <div class="step-card">
+      <div class="input">input</div>
+      <span class="var-xb">xᵇ</span> &nbsp; <span class="var-rng">// from Phase 2</span>
+      <div class="op">for k = 0 .. N_ens − 1: <br>
+        &nbsp;&nbsp;&nbsp;&nbsp;ε_k = pert_ensemble · 𝒩(0, I) &nbsp;<span class="var-rng">// from rng_ens</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="var-Xb">Xᵇ</span>[:, k] = model.propagate(xᵇ + ε_k, [0, T₃])
+      </div>
+      <div class="out"><span class="var-Xb">Xᵇ</span> ∈ ℝ<sup>n × N_ens</sup> &nbsp; with &nbsp; T₃ = spinup_ensemble</div>
+    </div>
+    <div class="note">
+      <span class="label">centring property</span>
+      Because each member only diverges for <code style="font-family:var(--font-mono)">spinup_ensemble</code>, <b>mean(Xᵇ) ≈ xᵇ</b>: the ensemble is centred on the offset background, not on the truth. That's what makes the experiment realistic. <b>Skip this phase</b> by passing <code style="font-family:var(--font-mono)">initial_ensemble=...</code>.
+    </div>
+  </div>
+</section>
+
+<section class="phase p-mauve">
+  <div>
+    <p class="phase-tag">Truth synchronisation</p>
+    <h2>The truth catches up to ensemble&nbsp;time.</h2>
+    <p class="intro">
+      Phases 2 and 3 advance the ensemble by <code style="font-family:var(--font-mono)">T₂ + T₃</code> in model time.
+      So we propagate the <em>truth</em> by exactly the same amount, starting from <code style="font-family:var(--font-mono)">x₀ʳᵉᶠ</code> with no perturbation, to get <code style="font-family:var(--font-mono)">truth[0]</code>.
+      Truth and ensemble are now anchored at the same instant — the filter can begin assimilating.
+    </p>
+  </div>
+  <div class="phase-body">
+    <div class="step-card">
+      <div class="input">input</div>
+      <span class="var-x0r">x₀ʳᵉᶠ</span>
+      <div class="op">propagate(x₀ʳᵉᶠ, [0, T₂ + T₃]) &nbsp;<span class="var-rng">// no perturbation, deterministic</span></div>
+      <div class="out"><span class="var-tr">truth[0]</span></div>
+      <div class="op" style="margin-top:14px">then for k = 0 .. K − 1: <br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="var-tr">truth[k + 1]</span> = model.propagate(truth[k], obs_freq)
+      </div>
+    </div>
+    <div class="note">
+      <span class="label">subtle but critical</span>
+      Since <code style="font-family:var(--font-mono)">truth[0] ≠ xᵇ</code> (Phase 2 perturbed and propagated; truth-sync did not), the filter sees a non-zero initial background error. <b>Reusing</b> precomputed <code style="font-family:var(--font-mono)">x0_ref</code> + <code style="font-family:var(--font-mono)">xb</code> + <code style="font-family:var(--font-mono)">initial_ensemble</code> across scenarios still costs the truth-sync propagation — but only that one.
+    </div>
+  </div>
+</section>
+
+<section class="phase p-sky">
+  <div>
+    <p class="phase-tag">Observation loop</p>
+    <h2>Reality, sampled noisily.</h2>
+    <p class="intro">
+      For each step <code style="font-family:var(--font-mono)">k</code>, an observation operator <code style="font-family:var(--font-mono)">opₖ</code> (either fixed or rebuilt from <code style="font-family:var(--font-mono)">rng_op</code>) is applied to <code style="font-family:var(--font-mono)">truth[k]</code>, and Gaussian noise drawn from <code style="font-family:var(--font-mono)">rng_noise</code> is added.
+      The whole sequence <code style="font-family:var(--font-mono)">y_0, ..., y_{K-1}</code> is what the filter actually consumes.
+    </p>
+  </div>
+  <div class="phase-body">
+    <div class="step-card">
+      <div class="input">for each step k</div>
+      <span class="var-rng">// pick or build the operator</span><br>
+      opₖ = base_op &nbsp; or &nbsp; operator_factory(rng_op)<br>
+      <div class="op">y_k = opₖ.apply(<span class="var-tr">truth[k]</span>) + noise.sample(rng_noise)</div>
+      <div class="out"><span class="var-y">observations</span> = [y_0, y_1, ..., y_{K-1}]</div>
+    </div>
+    <div class="note">
+      <span class="label">two scheduling modes</span>
+      <code style="font-family:var(--font-mono)">operator_schedule='fixed'</code> uses the same operator at every step (recommended for benchmarks: any RMSE difference is then attributable to the filter, not to varying obs networks). <code style="font-family:var(--font-mono)">'random'</code> rebuilds <code style="font-family:var(--font-mono)">opₖ</code> each step from <code style="font-family:var(--font-mono)">operator_factory</code>.
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>pyteda v0.3.0 · Scenario.generate flow</span>
+  <span class="signoff">three phases, four streams, one frozen experiment</span>
+</footer>
+
+</div>
+</body>
+</html>

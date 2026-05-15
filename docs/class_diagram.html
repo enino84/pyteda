@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pyteda · class diagram</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:        #fbf7ee;
+    --paper-deep:   #f3ecdc;
+    --ink:          #14213a;
+    --ink-2:        #2c3e6b;
+    --ink-faint:    #5d6b89;
+    --rule:         #c4b698;
+
+    /* category accents */
+    --c-model:      #2a5e3f;   /* moss green */
+    --c-model-bg:   #e7eee0;
+    --c-obs:        #804015;   /* burnt orange */
+    --c-obs-bg:     #f4e7d4;
+    --c-analysis:   #1f3d6a;   /* deep blue */
+    --c-analysis-bg:#e2e8ee;
+    --c-bg:         #6b3a4b;   /* claret */
+    --c-bg-bg:      #efe1e2;
+    --c-sim:        #3d3164;   /* aubergine */
+    --c-sim-bg:     #e9e3ed;
+    --c-exp:        #6b5400;   /* mustard */
+    --c-exp-bg:     #f3edd1;
+    --c-io:         #2b5a5e;   /* teal */
+    --c-io-bg:      #dfe9ea;
+
+    --shadow-card:  0 1px 0 rgba(20, 33, 58, 0.06),
+                    0 4px 14px -8px rgba(20, 33, 58, 0.18);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { background: var(--paper); }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    font-family: "Crimson Pro", Georgia, serif;
+    font-size: 17px;
+    line-height: 1.5;
+    background:
+      /* warm paper texture */
+      radial-gradient(ellipse 1200px 600px at 20% -10%, #f1e6c5 0%, transparent 60%),
+      radial-gradient(ellipse 900px 500px at 90% 110%, #ece3d0 0%, transparent 60%),
+      var(--paper);
+    background-attachment: fixed;
+  }
+
+  /* subtle grain overlay on the body */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      repeating-radial-gradient(
+        circle at 13% 27%, rgba(20,33,58,0.02) 0 1px, transparent 1px 4px),
+      repeating-radial-gradient(
+        circle at 78% 71%, rgba(20,33,58,0.02) 0 1px, transparent 1px 4px);
+    mix-blend-mode: multiply;
+    opacity: 0.6;
+  }
+
+  .page {
+    position: relative;
+    z-index: 1;
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 64px 56px 120px;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 36px;
+    align-items: end;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 28px;
+    margin-bottom: 56px;
+  }
+
+  .crest {
+    width: 78px;
+    height: 78px;
+    border: 2px solid var(--ink);
+    display: grid;
+    place-items: center;
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transform: rotate(-2deg);
+    background: var(--paper);
+    box-shadow: 4px 4px 0 var(--ink);
+  }
+  .crest small {
+    display: block;
+    font-size: 8px;
+    margin-top: 4px;
+    color: var(--ink-faint);
+  }
+
+  h1 {
+    font-family: "Crimson Pro", serif;
+    font-weight: 700;
+    font-size: 56px;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+  h1 em {
+    font-family: "JetBrains Mono", monospace;
+    font-style: normal;
+    font-size: 32px;
+    color: var(--ink-2);
+    font-weight: 500;
+    margin-right: 10px;
+    letter-spacing: -0.02em;
+  }
+  .subtitle {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .subtitle .sep { color: var(--rule); margin: 0 12px; }
+
+  /* ---------- Legend ---------- */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    padding: 14px 18px;
+    border: 1px solid var(--rule);
+    background: var(--paper-deep);
+    margin-bottom: 56px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+  .legend .item {
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .legend .swatch {
+    width: 18px; height: 12px;
+    border: 1px solid currentColor;
+    background: currentColor;
+  }
+  .legend .symbol-line {
+    display: inline-block;
+    width: 30px; height: 1px;
+    background: var(--ink);
+    position: relative;
+  }
+  .legend .symbol-line.dashed {
+    background:
+      repeating-linear-gradient(to right, var(--ink) 0 4px, transparent 4px 8px);
+  }
+  .legend .symbol-line::after {
+    content: ""; position: absolute; right: -1px; top: -3px;
+    width: 0; height: 0;
+    border-left: 6px solid var(--ink);
+    border-top: 3px solid transparent;
+    border-bottom: 3px solid transparent;
+  }
+  .legend .symbol-line.diamond::after {
+    width: 8px; height: 8px; background: var(--paper);
+    border: 1px solid var(--ink); transform: rotate(45deg);
+    border-left: 1px solid var(--ink); border-top: 1px solid var(--ink);
+    top: -3px; right: -4px;
+  }
+
+  /* ---------- Subsystem section ---------- */
+  section.subsystem {
+    margin-bottom: 64px;
+    page-break-inside: avoid;
+  }
+  section.subsystem > h2 {
+    font-family: "Crimson Pro", serif;
+    font-style: italic;
+    font-weight: 600;
+    font-size: 30px;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  section.subsystem > h2 .num {
+    font-family: "JetBrains Mono", monospace;
+    font-style: normal;
+    font-weight: 500;
+    color: var(--ink-faint);
+    font-size: 18px;
+    margin-right: 14px;
+    vertical-align: 4px;
+  }
+  section.subsystem > .summary {
+    font-size: 16px;
+    color: var(--ink-2);
+    margin: 0 0 24px;
+    max-width: 760px;
+  }
+  section.subsystem > .summary code {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    background: var(--paper-deep);
+    padding: 1px 5px;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+  }
+
+  /* ---------- Card grid (per subsystem) ---------- */
+  .grid {
+    display: grid;
+    gap: 22px;
+    grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
+    position: relative;
+  }
+  .grid.wide {
+    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  }
+
+  /* ---------- Class card ---------- */
+  .cls {
+    --accent: var(--ink);
+    --accent-bg: var(--paper-deep);
+    border: 1.5px solid var(--accent);
+    background: var(--paper);
+    box-shadow: var(--shadow-card);
+    position: relative;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .cls:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 1px 0 rgba(20, 33, 58, 0.06),
+                0 10px 22px -10px rgba(20, 33, 58, 0.28);
+  }
+
+  .cls .head {
+    background: var(--accent);
+    color: var(--paper);
+    padding: 9px 14px;
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.01em;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .cls .head .badge {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    opacity: 0.65;
+  }
+  .cls.abstract .head::before {
+    content: "⟨abstract⟩  ";
+    font-style: italic;
+    opacity: 0.7;
+    font-weight: 400;
+  }
+
+  .cls .meta {
+    padding: 8px 14px 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    letter-spacing: 0.05em;
+  }
+  .cls .meta .inherit {
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .cls .meta .inherit::before { content: "⊳ "; opacity: 0.6; }
+
+  .cls .desc {
+    padding: 6px 14px 10px;
+    font-size: 14px;
+    color: var(--ink-2);
+    border-bottom: 1px dashed var(--rule);
+    line-height: 1.4;
+  }
+
+  .cls ul {
+    list-style: none;
+    padding: 8px 14px 12px;
+    margin: 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+  }
+  .cls ul li {
+    color: var(--ink);
+    padding: 1.5px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .cls ul li::before {
+    content: "+";
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 11px;
+    width: 8px;
+    flex-shrink: 0;
+  }
+  .cls ul li.cls-method::before { content: "⊕"; font-size: 9px; }
+
+  /* per-category coloring */
+  .cls.model       { --accent: var(--c-model);    --accent-bg: var(--c-model-bg); }
+  .cls.observation { --accent: var(--c-obs);      --accent-bg: var(--c-obs-bg); }
+  .cls.analysis    { --accent: var(--c-analysis); --accent-bg: var(--c-analysis-bg); }
+  .cls.background  { --accent: var(--c-bg);       --accent-bg: var(--c-bg-bg); }
+  .cls.simulation  { --accent: var(--c-sim);      --accent-bg: var(--c-sim-bg); }
+  .cls.experiment  { --accent: var(--c-exp);      --accent-bg: var(--c-exp-bg); }
+  .cls.io          { --accent: var(--c-io);       --accent-bg: var(--c-io-bg); }
+
+  /* ---------- The Big Map (composition / cross-refs) ---------- */
+  section.bigmap {
+    margin-top: 80px;
+    border-top: 2px solid var(--ink);
+    padding-top: 40px;
+  }
+  section.bigmap h2 {
+    font-family: "Crimson Pro", serif;
+    font-style: italic;
+    font-size: 30px;
+    margin: 0 0 24px;
+  }
+
+  .map-svg {
+    width: 100%;
+    background: var(--paper-deep);
+    border: 1px solid var(--rule);
+    padding: 20px;
+  }
+  .map-svg text {
+    font-family: "JetBrains Mono", monospace;
+  }
+  .map-node-rect { fill: var(--paper); stroke-width: 1.5; }
+  .map-node-label {
+    font-size: 11px;
+    font-weight: 600;
+    fill: var(--ink);
+  }
+  .map-node-sub {
+    font-size: 9px;
+    fill: var(--ink-faint);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .map-edge { fill: none; stroke: var(--ink-faint); stroke-width: 1.2; }
+  .map-edge.composes { stroke-dasharray: 5 4; }
+  .map-edge-label {
+    font-size: 9px; fill: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+
+  /* ---------- Footer ---------- */
+  footer {
+    border-top: 1px solid var(--rule);
+    margin-top: 80px;
+    padding-top: 24px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    letter-spacing: 0.05em;
+  }
+  footer .signoff {
+    font-style: italic;
+    font-family: "Crimson Pro", serif;
+    font-size: 14px;
+    color: var(--ink-2);
+    letter-spacing: 0;
+  }
+
+  /* small screen tuning */
+  @media (max-width: 720px) {
+    .page { padding: 32px 20px 60px; }
+    h1 { font-size: 38px; }
+    h1 em { font-size: 22px; }
+    header { grid-template-columns: 1fr; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="crest">
+    pyteda
+    <small>v0.3.0</small>
+  </div>
+  <div>
+    <h1><em>pyteda</em>class architecture</h1>
+    <div class="subtitle">
+      Toolbox for Ensemble Data Assimilation
+      <span class="sep">·</span> seven subsystems
+      <span class="sep">·</span> ~40 classes
+      <span class="sep">·</span> traced from source
+    </div>
+  </div>
+</header>
+
+<!-- LEGEND -->
+<div class="legend">
+  <span class="item"><span class="swatch" style="color: var(--c-model)"></span>model</span>
+  <span class="item"><span class="swatch" style="color: var(--c-obs)"></span>observation</span>
+  <span class="item"><span class="swatch" style="color: var(--c-analysis)"></span>analysis</span>
+  <span class="item"><span class="swatch" style="color: var(--c-bg)"></span>background</span>
+  <span class="item"><span class="swatch" style="color: var(--c-sim)"></span>simulation</span>
+  <span class="item"><span class="swatch" style="color: var(--c-exp)"></span>experiments</span>
+  <span class="item"><span class="swatch" style="color: var(--c-io)"></span>io</span>
+  <span style="flex:1"></span>
+  <span class="item"><span class="symbol-line"></span> inherits</span>
+  <span class="item"><span class="symbol-line dashed diamond"></span> composes</span>
+</div>
+
+<!-- ============================================================
+     1. MODELS
+     ============================================================ -->
+<section class="subsystem">
+  <h2><span class="num">§ 01</span> models</h2>
+  <p class="summary">
+    The dynamical core. Every <code>Model</code> exposes a uniform contract — <code>propagate</code>, <code>get_initial_condition</code>, <code>get_ngb</code>, <code>get_pre</code>, <code>create_decorrelation_matrix</code> — so any analysis filter works against any model. Three concrete models ship: 1D Lorenz96, 1.5-layer Quasi-Geostrophic on a periodic plane, and shallow-water on the sphere. The QG model carries an internal subsystem of pluggable time integrators and boundary conditions.
+  </p>
+
+  <div class="grid">
+
+    <div class="cls model abstract">
+      <div class="head">Model <span class="badge">ABC</span></div>
+      <div class="meta">pyteda.models.model</div>
+      <div class="desc">Abstract base for all dynamical models.</div>
+      <ul>
+        <li>get_number_of_variables()</li>
+        <li>get_initial_condition()</li>
+        <li>propagate(x, T)</li>
+        <li>create_decorrelation_matrix(r)</li>
+        <li>get_decorrelation_matrix()</li>
+      </ul>
+    </div>
+
+    <div class="cls model">
+      <div class="head">Lorenz96</div>
+      <div class="meta"><span class="inherit">Model</span> · pyteda.models.lorenz96</div>
+      <div class="desc">40-variable cyclic chaotic system with single block <code>{'x'}</code>.</div>
+      <ul>
+        <li>lorenz96(x, t)</li>
+        <li>propagate(x, T)</li>
+        <li>get_ngb(i, r)</li>
+        <li>get_pre(i, r)</li>
+        <li>create_decorrelation_matrix(r)</li>
+      </ul>
+    </div>
+
+    <div class="cls model">
+      <div class="head">QGModel</div>
+      <div class="meta"><span class="inherit">Model</span> · pyteda.models.quasi_geostrophic</div>
+      <div class="desc">1.5-layer QG; state <code>[q, psi]</code>; pluggable scheme + BC + IC.</div>
+      <ul>
+        <li>list_available_integrators()</li>
+        <li>list_available_ics()</li>
+        <li>propagate(x, T)</li>
+        <li>get_ngb(i, r, cross)</li>
+        <li>create_decorrelation_matrix(r)</li>
+      </ul>
+    </div>
+
+    <div class="cls model">
+      <div class="head">SWEModel</div>
+      <div class="meta"><span class="inherit">Model</span> · pyteda.models.swe</div>
+      <div class="desc">Shallow-water on the sphere; configurable <code>state_vars</code> ⊆ {u, v, h}.</div>
+      <ul>
+        <li>propagate(x, T)</li>
+        <li>vorticity(x), divergence(x)</li>
+        <li>get_field(x, name)</li>
+        <li>get_ngb(i, r, cross)</li>
+        <li>create_decorrelation_matrix(r)</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- QG internals -->
+  <h3 style="font-family:'Crimson Pro',serif;font-style:italic;font-weight:600;font-size:20px;margin:36px 0 6px;color:var(--c-model)">— QG internals —</h3>
+  <p class="summary" style="margin-bottom:18px">
+    <code>QGModel</code> delegates the actual time-stepping to a <code>TimeIntegrator</code> chosen by name (<code>'rk4'</code>, <code>'dp5'</code>, <code>'leapfrog_raw'</code>, …) and the elliptic solve to a <code>BoundaryCondition</code>. Both are open extension points.
+  </p>
+
+  <div class="grid">
+
+    <div class="cls model abstract">
+      <div class="head">TimeIntegrator <span class="badge">ABC</span></div>
+      <div class="meta">pyteda.models.qg.integrators.base</div>
+      <ul>
+        <li>step(state, t, dt, rhs)</li>
+        <li>reset()</li>
+        <li>order()</li>
+        <li>rhs_evals_per_step()</li>
+      </ul>
+    </div>
+
+    <div class="cls model">
+      <div class="head">Euler · Midpoint · RK4</div>
+      <div class="meta"><span class="inherit">TimeIntegrator</span></div>
+      <div class="desc">Single-step explicit; orders 1, 2, 4.</div>
+    </div>
+
+    <div class="cls model">
+      <div class="head">DP5 · SSPRK3</div>
+      <div class="meta"><span class="inherit">TimeIntegrator</span></div>
+      <div class="desc">Higher-order single-step; embedded error / SSP.</div>
+    </div>
+
+    <div class="cls model">
+      <div class="head">AB2 · AB3 · AB4</div>
+      <div class="meta"><span class="inherit">_AdamsBashforthBase</span> &lt; <span class="inherit">TimeIntegrator</span></div>
+      <div class="desc">Linear multistep with bootstrap.</div>
+    </div>
+
+    <div class="cls model">
+      <div class="head">LeapfrogRA · LeapfrogRAW</div>
+      <div class="meta"><span class="inherit">_LeapfrogBase</span> &lt; <span class="inherit">TimeIntegrator</span></div>
+      <div class="desc">Three-time-level with Robert–Asselin / Williams filter.</div>
+    </div>
+
+    <div class="cls model">
+      <div class="head">DirichletBC · ChannelBC</div>
+      <div class="meta">pyteda.models.qg.boundary_conditions</div>
+      <ul>
+        <li>solve(rhs)  ← Helmholtz</li>
+        <li>laplacian(psi)</li>
+        <li>arakawa(psi, q)</li>
+        <li>dpsidy(psi)</li>
+      </ul>
+    </div>
+
+    <div class="cls model">
+      <div class="head">SphereGrid</div>
+      <div class="meta">pyteda.models.swe._grid · @dataclass</div>
+      <div class="desc">Driscoll-Healy grid + cached coords, Coriolis, FFT wavenumbers.</div>
+      <ul><li>SphereGrid.make(LMAX, …)</li></ul>
+    </div>
+
+    <div class="cls model">
+      <div class="head">RossbyPert</div>
+      <div class="meta">pyteda.models.swe._initial_conditions · @dataclass</div>
+      <div class="desc">Wavenumber-k Rossby perturbation envelope.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================
+     2. OBSERVATION
+     ============================================================ -->
+<section class="subsystem">
+  <h2><span class="num">§ 02</span> observation</h2>
+  <p class="summary">
+    Observation is split into two orthogonal abstractions: an <code>ObservationOperator</code> (how state maps to observation space, possibly nonlinear) and an <code>ObservationNoise</code> (the error covariance R, possibly dense). The <code>Observation</code> class composes both and exposes the legacy attributes (<code>H_index</code>, <code>R</code>, <code>y</code>) that all 10 filters consume — so the new system is a strict superset of the old.
+  </p>
+
+  <div class="grid wide">
+
+    <div class="cls observation abstract">
+      <div class="head">ObservationOperator <span class="badge">ABC</span></div>
+      <div class="meta">pyteda.observation.operators</div>
+      <ul>
+        <li>dim_obs / dim_state</li>
+        <li>apply(x)</li>
+        <li>linearize(x) → H</li>
+      </ul>
+    </div>
+
+    <div class="cls observation">
+      <div class="head">LinearSelection</div>
+      <div class="meta"><span class="inherit">ObservationOperator</span></div>
+      <div class="desc">Pick m of n state components.</div>
+      <ul>
+        <li>indices</li>
+        <li>apply(x), apply(X)</li>
+        <li>linearize() → eye-rows</li>
+      </ul>
+    </div>
+
+    <div class="cls observation">
+      <div class="head">LinearMatrix</div>
+      <div class="meta"><span class="inherit">ObservationOperator</span></div>
+      <div class="desc">Generic dense H matrix.</div>
+    </div>
+
+    <div class="cls observation">
+      <div class="head">NonlinearOperator</div>
+      <div class="meta"><span class="inherit">ObservationOperator</span></div>
+      <div class="desc">Wraps any callable h(x); FD jacobian fallback.</div>
+      <ul>
+        <li>apply(x) / apply(X)</li>
+        <li>linearize(x) → analytic or FD</li>
+      </ul>
+    </div>
+
+    <div class="cls observation abstract">
+      <div class="head">ObservationNoise <span class="badge">ABC</span></div>
+      <div class="meta">pyteda.observation.noise</div>
+      <ul>
+        <li>dim, R, R_inv</li>
+        <li>sample(rng)</li>
+        <li>sample_many(n, rng)</li>
+      </ul>
+    </div>
+
+    <div class="cls observation">
+      <div class="head">IsotropicDiagonal</div>
+      <div class="meta"><span class="inherit">ObservationNoise</span></div>
+      <div class="desc">R = σ² I; lazy-bind <code>dim</code>.</div>
+    </div>
+
+    <div class="cls observation">
+      <div class="head">HeterogeneousDiagonal</div>
+      <div class="meta"><span class="inherit">ObservationNoise</span></div>
+      <div class="desc">R = diag(σᵢ²); per-component stds.</div>
+    </div>
+
+    <div class="cls observation">
+      <div class="head">DenseCovariance</div>
+      <div class="meta"><span class="inherit">ObservationNoise</span></div>
+      <div class="desc">Arbitrary SPD R; Cholesky-cached sampling.</div>
+    </div>
+
+    <div class="cls observation">
+      <div class="head">Observation</div>
+      <div class="meta">pyteda.observation.observation_core</div>
+      <div class="desc">Composes operator + noise; preserves legacy <code>H_index</code> / <code>R</code> / <code>y</code> for every filter.</div>
+      <ul>
+        <li>Observation.from_arrays()</li>
+        <li>operator, noise (props)</li>
+        <li>apply(x), linearize(x)</li>
+        <li>set_observation_operator()</li>
+      </ul>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================
+     3. ANALYSIS
+     ============================================================ -->
+<section class="subsystem">
+  <h2><span class="num">§ 03</span> analysis</h2>
+  <p class="summary">
+    Ten ensemble filters share the abstract <code>Analysis</code> contract. <code>perform_assimilation(background, observation)</code> is the one method that matters; the rest are accessors. <code>AnalysisFactory</code> dispatches by string identifier so users write <code>method='letkf', r={'q': 2, 'psi': 4}</code> and the right class is built.
+  </p>
+
+  <div class="grid wide">
+
+    <div class="cls analysis abstract">
+      <div class="head">Analysis <span class="badge">ABC</span></div>
+      <div class="meta">pyteda.analysis.analysis_core</div>
+      <ul>
+        <li>perform_assimilation(bg, obs)</li>
+        <li>get_analysis_state()</li>
+        <li>get_ensemble()</li>
+        <li>get_error_covariance()</li>
+        <li>inflate_ensemble(λ)</li>
+      </ul>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisFactory</div>
+      <div class="meta">pyteda.analysis.analysis_factory</div>
+      <div class="desc">Registry → <code>create_analysis()</code> dispatch by name.</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisEnKF</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'enkf'</div>
+      <div class="desc">Stochastic EnKF (Burgers et al. 1998).</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisEnKFCholesky</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'enkf-cholesky'</div>
+      <div class="desc">EnKF with Cholesky update for stability.</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisEnKFNaive</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'enkf-naive'</div>
+      <div class="desc">Direct Kalman-gain, instructional baseline.</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisEnKFBLoc</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'enkf-b-loc'</div>
+      <div class="desc">EnKF with B localization.</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisEnKFModifiedCholesky</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'enkf-modified-cholesky'</div>
+      <div class="desc">Nino-Ruiz et al. — sparse precision via local Cholesky.</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisEnKFShrinkagePrecision</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'enkf-shrinkage-precision'</div>
+      <div class="desc">Ledoit-Wolf-style shrinkage on B⁻¹.</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisETKF</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'etkf'</div>
+      <div class="desc">Ensemble Transform KF (Bishop et al. 2001).</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisEnSRF</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'ensrf'</div>
+      <div class="desc">Square-root filter (Whitaker & Hamill 2002).</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisLEnKF</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'lenkf'</div>
+      <div class="desc">Localized EnKF; r dispatch (int/dict/array).</div>
+    </div>
+
+    <div class="cls analysis">
+      <div class="head">AnalysisLETKF</div>
+      <div class="meta"><span class="inherit">Analysis</span> · 'letkf'</div>
+      <div class="desc">Local ETKF (Hunt et al. 2007); per-block r.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================
+     4. BACKGROUND
+     ============================================================ -->
+<section class="subsystem">
+  <h2><span class="num">§ 04</span> background</h2>
+  <p class="summary">
+    A thin wrapper around the model that holds the current ensemble and advances it one observation cycle at a time.
+  </p>
+
+  <div class="grid">
+    <div class="cls background">
+      <div class="head">Background</div>
+      <div class="meta">pyteda.background.background_core</div>
+      <ul>
+        <li>get_initial_ensemble()</li>
+        <li>forecast_step(Xa, T)</li>
+        <li>get_ensemble()</li>
+        <li>get_background_state() (mean)</li>
+        <li>get_member_deviations()</li>
+        <li>get_covariance_matrix()</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     5. SIMULATION
+     ============================================================ -->
+<section class="subsystem">
+  <h2><span class="num">§ 05</span> simulation</h2>
+  <p class="summary">
+    The execution engine. Two modes: legacy (model + background + analysis + observation tuple) and the v2 path (<code>Simulation.from_scenario(scenario, analysis)</code>) that runs against a frozen <code>Scenario</code>. Optional flag <code>store_diagnostics=True</code> records spread, CRPS and rank-histogram counts at every step.
+  </p>
+
+  <div class="grid">
+    <div class="cls simulation">
+      <div class="head">Simulation</div>
+      <div class="meta">pyteda.simulation.simulation_core</div>
+      <ul>
+        <li>Simulation.from_scenario(...)</li>
+        <li>run()</li>
+        <li>get_errors() → (err_b, err_a)</li>
+        <li>relative_error(x, x*)</li>
+        <li>get_saved_states()</li>
+        <li class="cls-method">spread_a, crps_a, rank_counts_a</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     6. EXPERIMENTS
+     ============================================================ -->
+<section class="subsystem">
+  <h2><span class="num">§ 06</span> experiments</h2>
+  <p class="summary">
+    The reproducibility layer. <code>Scenario.generate</code> builds the entire twin-experiment in three phases (<code>x0_ref</code> → <code>xb</code> → <code>X_b</code>) under a master seed, with truth synchronisation. <code>Benchmark</code> takes M scenarios × K methods × R runs and returns a <code>BenchmarkResults</code> with calibration diagnostics and plotters.
+  </p>
+
+  <div class="grid">
+
+    <div class="cls experiment">
+      <div class="head">Scenario</div>
+      <div class="meta">pyteda.experiments.scenario · @dataclass</div>
+      <div class="desc">Frozen twin experiment: truth, observations, operators, ensemble, x0_ref, xb.</div>
+      <ul>
+        <li>Scenario.generate(...)</li>
+        <li>iter_steps()</li>
+        <li>save(path), Scenario.load(path)</li>
+        <li>n_steps, n_state, dim_obs (props)</li>
+      </ul>
+    </div>
+
+    <div class="cls experiment">
+      <div class="head">Benchmark</div>
+      <div class="meta">pyteda.experiments.benchmark</div>
+      <div class="desc">M × K × R grid runner; sequential or joblib-parallel.</div>
+      <ul>
+        <li>run() → BenchmarkResults</li>
+      </ul>
+    </div>
+
+    <div class="cls experiment">
+      <div class="head">BenchmarkResults</div>
+      <div class="meta">pyteda.experiments.benchmark · @dataclass</div>
+      <ul>
+        <li>summary_table()</li>
+        <li>diagnostics_summary()</li>
+        <li>compare(other)</li>
+        <li>plot_error_curves(ax)</li>
+        <li>plot_spread_vs_error(ax)</li>
+        <li>plot_rank_histogram(method, ax)</li>
+      </ul>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================
+     7. IO  (functional, but deserves a place)
+     ============================================================ -->
+<section class="subsystem">
+  <h2><span class="num">§ 07</span> io</h2>
+  <p class="summary">
+    Functional module — no public classes — exposing roundtrip helpers for the artifacts that scenarios depend on. netCDF by default, npz fallback. Format auto-detected by extension. <code>get_data_dir()</code> returns the user's chosen storage directory.
+  </p>
+
+  <div class="grid wide">
+    <div class="cls io">
+      <div class="head">pyteda.io <span class="badge">module</span></div>
+      <div class="meta">pyteda.io</div>
+      <ul>
+        <li>save_state_vector / load_state_vector</li>
+        <li>save_initial_ensemble / load_initial_ensemble</li>
+        <li>save_truth_trajectory / load_truth_trajectory</li>
+        <li>save_observations / load_observations</li>
+        <li>save_scenario / load_scenario</li>
+        <li>get_data_dir(path=None)</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     THE BIG MAP — composition wiring
+     ============================================================ -->
+<section class="bigmap">
+  <h2>System wiring · how the pieces compose at runtime</h2>
+  <p class="summary" style="margin-bottom:24px">
+    Inheritance is shown as solid arrows. Composition (one object holds a reference to another) is shown as dashed arrows with a diamond head. Read it as: a <code>Simulation</code> drives a <code>Background</code> through an <code>Analysis</code> against an <code>Observation</code>; a <code>Scenario</code> freezes all of that for a single seeded experiment; a <code>Benchmark</code> orchestrates many <code>Scenario</code> × <code>Analysis</code> cells.
+  </p>
+
+  <svg class="map-svg" viewBox="0 0 1000 540" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="10" refY="5"
+              markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#5d6b89" />
+      </marker>
+      <marker id="diam" viewBox="0 0 12 10" refX="11" refY="5"
+              markerWidth="11" markerHeight="9" orient="auto-start-reverse">
+        <path d="M 0 5 L 6 0 L 12 5 L 6 10 z" fill="#fbf7ee" stroke="#5d6b89" stroke-width="1.2"/>
+      </marker>
+    </defs>
+
+    <!-- Top row: Model + Observation = inputs -->
+    <g>
+      <rect class="map-node-rect" x="40"  y="40" width="160" height="56" rx="2" stroke="#2a5e3f"/>
+      <text class="map-node-sub" x="120" y="56" text-anchor="middle">model · §01</text>
+      <text class="map-node-label" x="120" y="76" text-anchor="middle">Model</text>
+      <text class="map-node-sub" x="120" y="89" text-anchor="middle">L96 · QG · SWE</text>
+    </g>
+
+    <g>
+      <rect class="map-node-rect" x="240" y="40" width="160" height="56" rx="2" stroke="#804015"/>
+      <text class="map-node-sub" x="320" y="56" text-anchor="middle">observation · §02</text>
+      <text class="map-node-label" x="320" y="76" text-anchor="middle">Observation</text>
+      <text class="map-node-sub" x="320" y="89" text-anchor="middle">operator + noise</text>
+    </g>
+
+    <g>
+      <rect class="map-node-rect" x="800" y="40" width="160" height="56" rx="2" stroke="#1f3d6a"/>
+      <text class="map-node-sub" x="880" y="56" text-anchor="middle">analysis · §03</text>
+      <text class="map-node-label" x="880" y="76" text-anchor="middle">Analysis</text>
+      <text class="map-node-sub" x="880" y="89" text-anchor="middle">10 filters</text>
+    </g>
+
+    <!-- Middle row: Background and Scenario -->
+    <g>
+      <rect class="map-node-rect" x="40"  y="180" width="160" height="56" rx="2" stroke="#6b3a4b"/>
+      <text class="map-node-sub" x="120" y="196" text-anchor="middle">background · §04</text>
+      <text class="map-node-label" x="120" y="216" text-anchor="middle">Background</text>
+      <text class="map-node-sub" x="120" y="229" text-anchor="middle">ensemble carrier</text>
+    </g>
+
+    <g>
+      <rect class="map-node-rect" x="420" y="180" width="160" height="56" rx="2" stroke="#6b5400"/>
+      <text class="map-node-sub" x="500" y="196" text-anchor="middle">experiments · §06</text>
+      <text class="map-node-label" x="500" y="216" text-anchor="middle">Scenario</text>
+      <text class="map-node-sub" x="500" y="229" text-anchor="middle">3-phase frozen</text>
+    </g>
+
+    <!-- Bottom row: Simulation + Benchmark + Results -->
+    <g>
+      <rect class="map-node-rect" x="240" y="320" width="160" height="56" rx="2" stroke="#3d3164"/>
+      <text class="map-node-sub" x="320" y="336" text-anchor="middle">simulation · §05</text>
+      <text class="map-node-label" x="320" y="356" text-anchor="middle">Simulation</text>
+      <text class="map-node-sub" x="320" y="369" text-anchor="middle">execution engine</text>
+    </g>
+
+    <g>
+      <rect class="map-node-rect" x="600" y="320" width="160" height="56" rx="2" stroke="#6b5400"/>
+      <text class="map-node-sub" x="680" y="336" text-anchor="middle">experiments · §06</text>
+      <text class="map-node-label" x="680" y="356" text-anchor="middle">Benchmark</text>
+      <text class="map-node-sub" x="680" y="369" text-anchor="middle">M × K × R runner</text>
+    </g>
+
+    <g>
+      <rect class="map-node-rect" x="600" y="440" width="160" height="56" rx="2" stroke="#6b5400"/>
+      <text class="map-node-sub" x="680" y="456" text-anchor="middle">experiments · §06</text>
+      <text class="map-node-label" x="680" y="476" text-anchor="middle">BenchmarkResults</text>
+      <text class="map-node-sub" x="680" y="489" text-anchor="middle">tables + plots</text>
+    </g>
+
+    <g>
+      <rect class="map-node-rect" x="800" y="440" width="160" height="56" rx="2" stroke="#2b5a5e"/>
+      <text class="map-node-sub" x="880" y="456" text-anchor="middle">io · §07</text>
+      <text class="map-node-label" x="880" y="476" text-anchor="middle">pyteda.io</text>
+      <text class="map-node-sub" x="880" y="489" text-anchor="middle">netCDF / npz</text>
+    </g>
+
+    <!-- COMPOSITION EDGES (dashed with diamond start) -->
+    <!-- Model -> Background -->
+    <path class="map-edge composes" d="M 120 96 L 120 180" marker-end="url(#diam)"/>
+    <text class="map-edge-label" x="128" y="142">holds</text>
+
+    <!-- Model -> Scenario -->
+    <path class="map-edge composes" d="M 200 68 Q 380 68 420 200" marker-end="url(#diam)"/>
+
+    <!-- Observation -> Scenario (operators + noise) -->
+    <path class="map-edge composes" d="M 320 96 L 470 180" marker-end="url(#diam)"/>
+
+    <!-- Analysis -> Simulation -->
+    <path class="map-edge composes" d="M 800 110 Q 600 200 400 340" marker-end="url(#diam)"/>
+    <text class="map-edge-label" x="600" y="220">holds</text>
+
+    <!-- Background -> Simulation -->
+    <path class="map-edge composes" d="M 200 220 L 240 340" marker-end="url(#diam)"/>
+
+    <!-- Scenario -> Simulation (Simulation.from_scenario) -->
+    <path class="map-edge composes" d="M 460 236 L 340 320" marker-end="url(#diam)"/>
+    <text class="map-edge-label" x="370" y="285">from_scenario</text>
+
+    <!-- Scenario -> Benchmark (list of) -->
+    <path class="map-edge composes" d="M 580 220 Q 660 240 660 320" marker-end="url(#diam)"/>
+    <text class="map-edge-label" x="600" y="270">[scenarios]</text>
+
+    <!-- Benchmark -> Simulation (one per cell) -->
+    <path class="map-edge" d="M 600 358 L 400 358" marker-end="url(#arr)"/>
+    <text class="map-edge-label" x="468" y="350">spawns Simulation</text>
+
+    <!-- Benchmark -> BenchmarkResults -->
+    <path class="map-edge" d="M 680 376 L 680 440" marker-end="url(#arr)"/>
+    <text class="map-edge-label" x="690" y="412">.run()</text>
+
+    <!-- Scenario -> io -->
+    <path class="map-edge" d="M 580 208 Q 880 200 880 440" marker-end="url(#arr)"/>
+    <text class="map-edge-label" x="800" y="240">save / load</text>
+
+  </svg>
+</section>
+
+<footer>
+  <span>pyteda v0.3.0 · Toolbox for Ensemble Data Assimilation</span>
+  <span class="signoff">a class diagram, set in Crimson Pro &amp; JetBrains Mono</span>
+</footer>
+
+</div>
+</body>
+</html>

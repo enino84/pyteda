@@ -1,0 +1,78 @@
+# -*- coding: utf-8 -*-
+
+import numpy as np
+
+from .analysis_core import Analysis
+from .registry import register_analysis
+
+@register_analysis("enkf-naive")
+class AnalysisEnKFNaive(Analysis):
+    def __init__(self, **kwargs):
+        pass
+
+    def perform_assimilation(self, background, observation):
+        Xb = background.get_ensemble()
+        y = observation.get_observation()
+        R = observation.get_data_error_covariance()
+        n, ensemble_size = Xb.shape
+
+        from ._obs_utils import linearize_at_mean
+        H, HXb = linearize_at_mean(observation, Xb)
+
+        # Sample observation noise efficiently — avoid materialising R for large m.
+        # multivariate_normal does an SVD of R internally; for diagonal R that
+        # is wasteful and at high m can run out of memory. Use the noise
+        # object's sample_many(), which knows the right per-class shortcut.
+        Ys = y[:, None] + observation.noise.sample_many_legacy(ensemble_size)
+        D = Ys - HXb
+        xb = np.mean(Xb, axis=1)
+        DX = Xb - np.outer(xb, np.ones(ensemble_size))
+        DXG = 1 / (np.sqrt(ensemble_size - 1)) * DX
+        Q = H @ DXG
+        IN = R + Q @ Q.T
+        Z = np.linalg.solve(IN, D)
+        self.Xa = Xb + DXG @ (Q.T @ Z)
+        return self.Xa
+
+    def get_analysis_state(self):
+        return np.mean(self.Xa, axis=1)
+
+    def inflate_ensemble(self, inflation_factor):
+        """Computes ensemble Xa given the inflation factor
+
+        Parameters
+        ----------
+        inflation_factor : int
+            A double number indicating the inflation factor
+
+        Returns
+        -------
+        None
+        """
+        _, ensemble_size = self.Xa.shape
+        xa = self.get_analysis_state()
+        DXa = self.Xa - np.outer(xa, np.ones(ensemble_size))
+        self.Xa = np.outer(xa, np.ones(ensemble_size)) + inflation_factor * DXa
+
+    def get_ensemble(self):
+        """Returns ensemble Xa
+
+        Parameters:
+            None
+
+        Returns:
+            ensemble_matrix: Ensemble matrix
+        """
+        return self.Xa
+  
+    def get_error_covariance(self):
+        """Returns the computed covariance matrix of the ensemble Xa
+
+        Parameters:
+            None
+
+        Returns:
+            covariance_matrix: None - we avoid computing the full covariance in this implementation
+        """
+        return None
+

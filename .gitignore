@@ -1,0 +1,52 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribución / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# ===== Entornos virtuales =====
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# ===== Testing / coverage =====
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+coverage.xml
+.hypothesis/
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== Editores / IDEs =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== Sistema operativo =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Resultados del modelo (TEDA-V2) =====
+lorenz96_demo_figs/
+lorenz96_shrinkage_figs/
+swe_demo_figs/
+swe_shrinkage_figs/
+swe_cache/
+lorenz96_demo_figs.zip
+lorenz96_shrinkage_figs.zip
