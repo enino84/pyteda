@@ -26,7 +26,7 @@ _BINV_CRITERION_BY_KEY = {
     "enkf-shrinkage-binv-mse":   "mse",
     "enkf-shrinkage-binv-stein": "stein",
     "enkf-shrinkage-binv-da":    "da",
-    "enkf-shrinkage-precision":  "heuristic",   # legacy default
+    "enkf-shrinkage-precision":  "mse",   # legacy alias → default criterion
     # "enkf-shrinkage-binv" alone leaves criterion to the kwargs/default
 }
 

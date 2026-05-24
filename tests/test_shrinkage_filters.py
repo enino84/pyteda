@@ -248,7 +248,7 @@ class TestNewFiltersEndToEnd:
 # Three-criteria shrinkage-Binv tests
 # ----------------------------------------------------------------------
 class TestShrinkageBinvCriteria:
-    """The 4 criteria (heuristic/mse/stein/da) must:
+    """The 3 criteria (mse/stein/da) must:
        - produce α ∈ [0, 1]
        - produce *different* α in general (not all identical)
        - run end-to-end on a small Lorenz96 scenario
@@ -258,7 +258,7 @@ class TestShrinkageBinvCriteria:
         """All four criteria must give α ∈ [0,1] over a real run."""
         from pyteda.simulation import Simulation
         from pyteda.analysis.analysis_factory import AnalysisFactory
-        for crit in ["heuristic", "mse", "stein", "da"]:
+        for crit in ["mse", "stein", "da"]:
             analysis = AnalysisFactory(
                 "enkf-shrinkage-binv", model=small_lorenz96,
                 criterion=crit,
@@ -279,7 +279,7 @@ class TestShrinkageBinvCriteria:
             "enkf-shrinkage-binv-mse":  "mse",
             "enkf-shrinkage-binv-stein": "stein",
             "enkf-shrinkage-binv-da":   "da",
-            "enkf-shrinkage-precision": "heuristic",   # legacy
+            "enkf-shrinkage-precision": "mse",   # legacy alias
         }
         for key, expected in cases.items():
             analysis = AnalysisFactory(
@@ -308,7 +308,7 @@ class TestShrinkageBinvCriteria:
         from pyteda.simulation import Simulation
         from pyteda.analysis.analysis_factory import AnalysisFactory
         alphas = {}
-        for crit in ["heuristic", "mse", "stein", "da"]:
+        for crit in ["mse", "stein", "da"]:
             analysis = AnalysisFactory(
                 "enkf-shrinkage-binv", model=small_lorenz96,
                 criterion=crit,

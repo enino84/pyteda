@@ -32,6 +32,7 @@ from .noise import (
     BlockDiagonal,
     DenseCovariance,
 )
+from .grid_masks import checkerboard_indices, strided_indices
 
 __all__ = [
     "Observation",
@@ -44,4 +45,6 @@ __all__ = [
     "HeterogeneousDiagonal",
     "BlockDiagonal",
     "DenseCovariance",
+    "checkerboard_indices",
+    "strided_indices",
 ]

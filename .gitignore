@@ -50,3 +50,5 @@ swe_shrinkage_figs/
 swe_cache/
 lorenz96_demo_figs.zip
 lorenz96_shrinkage_figs.zip
+lorenz96*
+swe*

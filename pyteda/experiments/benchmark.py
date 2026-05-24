@@ -266,7 +266,7 @@ class BenchmarkResults:
                 "mean_rmse_b", "mean_spread_b", "mean_crps_b", "n"]
         return agg[cols].sort_values("mean_rmse_a").reset_index(drop=True)
 
-    def export_csv(self, directory):
+    def export_csv(self, directory, burn_in_frac=0.0):
         """Write four CSVs that fully describe the benchmark.
 
         Files written under ``directory`` (created if needed):
@@ -295,6 +295,16 @@ class BenchmarkResults:
         ----------
         directory : str or pathlib.Path
             Output directory. Created if it does not exist.
+        burn_in_frac : float, optional (default 0.0)
+            Fraction of the initial (spin-up) cycles to discard before
+            computing the time-averaged metrics (``mean_rmse_a``,
+            ``mean_spread_a``, ``mean_crps_a``, and the spread/error
+            ratio). The transient during which all filters are still
+            converging is not representative of steady-state skill, so
+            for data-assimilation reporting this is typically set to
+            0.2–0.3. ``final_rmse_a`` and ``median_rmse_a`` are unaffected
+            (they are already steady-state-representative). The
+            ``error_curves.csv`` keeps the full series regardless.
 
         Returns
         -------
@@ -311,26 +321,37 @@ class BenchmarkResults:
 
         has_diag = bool(self.rows) and "spread_a" in self.rows[0]
 
+        def _post(series):
+            """Discard the first burn_in_frac of a per-cycle series."""
+            arr = np.asarray(series)
+            if burn_in_frac <= 0.0 or arr.size == 0:
+                return arr
+            cut = int(np.ceil(burn_in_frac * arr.size))
+            cut = min(cut, arr.size - 1)   # always keep at least one point
+            return arr[cut:]
+
         # 1. Per-cell summary (one row per scenario × method × run)
         cell_records = []
         for r in self.rows:
+            ea_post = _post(r["error_a"])
+            eb_post = _post(r["error_b"])
             rec = {
                 "method":        r["method"],
                 "scenario_id":   r["scenario_id"],
                 "run_id":        r["run_id"],
                 "method_seed":   r["method_seed"],
                 "elapsed_s":     r["elapsed"],
-                "mean_rmse_a":   float(np.mean(r["error_a"])),
-                "median_rmse_a": float(np.median(r["error_a"])),
+                "mean_rmse_a":   float(np.mean(ea_post)),
+                "median_rmse_a": float(np.median(ea_post)),
                 "final_rmse_a":  float(r["error_a"][-1]),
-                "mean_rmse_b":   float(np.mean(r["error_b"])),
-                "median_rmse_b": float(np.median(r["error_b"])),
+                "mean_rmse_b":   float(np.mean(eb_post)),
+                "median_rmse_b": float(np.median(eb_post)),
             }
             if has_diag:
-                rec["mean_spread_a"] = float(np.mean(r["spread_a"]))
-                rec["mean_spread_b"] = float(np.mean(r["spread_b"]))
-                rec["mean_crps_a"]   = float(np.mean(r["crps_a"]))
-                rec["mean_crps_b"]   = float(np.mean(r["crps_b"]))
+                rec["mean_spread_a"] = float(np.mean(_post(r["spread_a"])))
+                rec["mean_spread_b"] = float(np.mean(_post(r["spread_b"])))
+                rec["mean_crps_a"]   = float(np.mean(_post(r["crps_a"])))
+                rec["mean_crps_b"]   = float(np.mean(_post(r["crps_b"])))
                 rec["spread_error_ratio_a"] = (
                     rec["mean_spread_a"] / rec["mean_rmse_a"]
                     if rec["mean_rmse_a"] > 0 else float("nan")
