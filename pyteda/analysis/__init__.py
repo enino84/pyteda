@@ -10,6 +10,7 @@ from .analysis_enkf import AnalysisEnKF
 from .analysis_enkf_bloc import AnalysisEnKFBLoc
 from .analysis_enkf_cholesky import AnalysisEnKFCholesky
 from .analysis_enkf_modified_cholesky import AnalysisEnKFModifiedCholesky
+from .analysis_enkf_obs_modified_cholesky import AnalysisEnKFObsModifiedCholesky
 from .analysis_enkf_naive import AnalysisEnKFNaive
 from .analysis_lenkf import AnalysisLEnKF
 from .analysis_ensrf import AnalysisEnSRF

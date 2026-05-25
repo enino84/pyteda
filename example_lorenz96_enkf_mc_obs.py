@@ -1,30 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Lorenz96 — full experiment: 12 methods × 10 scenarios.
+Lorenz96 — full experiment: 14 methods × 10 scenarios.
 
-Configuration:
-  Phase 1 (truth):      synthetic IC -> propagate 10 time units -> x0_ref
-                        x0_ref is computed ONCE and shared across the 10 scenarios.
-  Phase 2 (xb):         kick + propagate 10 time units -> xb     (varies by seed)
-  Phase 3 (ensemble):   per-member kick + propagate 10 time units -> X_b (varies)
-  Assimilation:         obs_freq = 0.5, end_time = 10.0  (~21 obs cycles)
-  Observation noise:    isotropic Gaussian, std = 0.01
-  Methods:              12 from the registry (incl. LW, RBLW, Shrinkage-Binv)
-  Scenarios per method: 10 (different observation network and initial ensemble)
-
-Plots:
-  01_error_curves_all.png       Mean RMSE_a(t) per method, ±1σ band, log-Y.
-  02_analysis_vs_background.png Same plus background (dashed). All methods, log-Y.
-  03_spread_vs_error.png        Built-in diagnostic.
-  06_boxplot_log/linear.png     Per-method RMSE distributions (analysis + background).
-  per_method/                   One PNG per method: curves + rank histogram.
-  radars/                       One PNG per (top method, snapshot).
-
-Run:
-
-    python example_lorenz96.py
-
-Figures land in ./lorenz96_demo_figs/.
+Companion to: "An ensemble Kalman filter implementation based on
+shrinkage estimators of the precision matrix via modified Cholesky
+decomposition" (Niño-Ruiz, J. Comput. Appl. Math., in preparation).
 """
 
 from __future__ import annotations
@@ -37,20 +17,31 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from pyteda.models import Lorenz96
-from pyteda.observation import LinearSelection, IsotropicDiagonal
+from pyteda.observation import LinearSelection, IsotropicDiagonal, strided_indices
 from pyteda.experiments import Scenario, Benchmark
+
+from datetime import datetime
+
+
 
 
 # ----------------------------------------------------------------------
 # Configuration
 # ----------------------------------------------------------------------
 N_STATE         = 40
-N_OBS           = 32
 NOISE_STD       = 0.01
 ENSEMBLE_SIZE   = 20
-OBS_FREQ        = 0.50
-END_TIME        = 10.0
+OBS_FREQ        = 0.30
+END_TIME        = 50.0
 INFLATION       = 1.04
+
+# Fraction of initial (spin-up) cycles discarded when computing the
+# time-averaged CSV metrics (mean_rmse_a, mean_spread_a, CRPS, and the
+# spread/error ratio). The transient while the filters are still
+# converging is not representative of steady-state skill, so for DA
+# reporting this is set to 0.2-0.3. final_rmse_a / median_rmse_a are
+# unaffected (already steady-state-representative).
+BURN_IN_FRAC    = 0.30
 
 SPINUP_TRUTH    = 10.0
 PERT_XB         = 0.5
@@ -58,28 +49,39 @@ SPINUP_XB       = 10.0
 PERT_ENSEMBLE   = 0.05
 SPINUP_ENSEMBLE = 10.0
 
-N_SCENARIOS     = 10
+# Observation network: strided sampling, observe 1 of every SPACING
+# variables (spacing=2 -> 20 of 40 = 50%; spacing=3 -> ~35%).
+SPACING         = 3
+
+# Modified-Cholesky regression method for the Cholesky-based filters
+# (EnKF-MC and the three precision-space shrinkage criteria): solve each
+# local conditional regression either by Ridge regression ("ridge",
+# default) or by truncated-SVD pseudo-inverse ("svd") with relative
+# tolerance CHOL_TOL.
+CHOL_METHOD     = "ridge"
+CHOL_TOL        = 0.35
+
+# One run per method.
+N_SCENARIOS     = 1
 SCENARIO_SEEDS  = list(range(42, 42 + N_SCENARIOS))
 
 SNAP_FRACTIONS  = [0.0, 0.25, 0.5, 0.75, 1.0]
 N_TOP_METHODS   = 6
 
 METHODS = {
+
+    "EnKF-OBS-MC(r=2)": dict(method="enkf-obs-modified-cholesky",
+                            r=2, r_state=2, b_via_cholesky=True, alpha=0.01),
+                            
     # Plain stochastic EnKF and its variants without shrinkage
     "EnKF-BLoc":            dict(method="enkf-b-loc"),
-
-    # Modified-Cholesky family
-    "EnKF-MC(r=2)":         dict(method="enkf-modified-cholesky", r=2),
 
     # Localised filters
     "LEnKF(r=2)":           dict(method="lenkf", r=2),
     "LETKF(r=2)":           dict(method="letkf", r=2),
-
-    
 }
 
-FIG_DIR = "lorenz96_demo_figs"
-
+FIG_DIR = f"lorenz96_mc_obs_sp{SPACING}_" + datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def build_scenarios():
     print("=" * 72)
@@ -89,6 +91,11 @@ def build_scenarios():
     model = Lorenz96(n=N_STATE)
     n = model.get_number_of_variables()
 
+    # Strided observation network: 1 of every SPACING variables.
+    obs_indices, n_obs = strided_indices(model, spacing=SPACING)
+    print(f"  strided spacing={SPACING}: {n_obs} of {n} variables observed "
+          f"({100*n_obs/n:.0f}%)")
+
     x0_synth = model.get_initial_condition()
     x0_ref = model.propagate(x0_synth, np.array([0.0, SPINUP_TRUTH]))
     print(f"  x0_ref built once  (||x0_ref|| = {np.linalg.norm(x0_ref):.3f})")
@@ -97,10 +104,10 @@ def build_scenarios():
     for s in SCENARIO_SEEDS:
         scen = Scenario.generate(
             model=model,
-            operator_factory=lambda rng: LinearSelection(
-                m=N_OBS, n_state=n, rng=rng,
+            operator_factory=lambda rng, idx=obs_indices: LinearSelection(
+                m=idx.size, n_state=n, indices=idx,
             ),
-            noise=IsotropicDiagonal(std=NOISE_STD, dim=N_OBS),
+            noise=IsotropicDiagonal(std=NOISE_STD, dim=n_obs),
             ensemble_size=ENSEMBLE_SIZE,
             x0_ref=x0_ref,
             pert_xb=PERT_XB, spinup_xb=SPINUP_XB,
@@ -176,7 +183,7 @@ def plot_rmse_evolution(results, savedir):
         ax.fill_between(t, low, high,
                         color=color, alpha=0.18, linewidth=0)
     ax.set_xlabel("time")
-    ax.set_ylabel(r"RMSE$_a$  (median, 16–84% band over 10 scenarios)")
+    ax.set_ylabel(r"RMSE$_a$  (median over scenarios)")
     ax.set_yscale("log")
     ax.set_title("Lorenz96 — analysis-error evolution per method")
     ax.grid(True, which="both", alpha=0.3)
@@ -219,7 +226,7 @@ def plot_analysis_vs_background(results, savedir):
               loc="center left", bbox_to_anchor=(1.02, 0.15),
               fontsize=9, frameon=False, title="line style")
     ax.set_xlabel("time")
-    ax.set_ylabel(r"RMSE  (median, 16–84% band over 10 scenarios)")
+    ax.set_ylabel(r"RMSE  (median over scenarios)")
     ax.set_yscale("log")
     ax.set_title("Lorenz96 — analysis (solid) vs background (dashed) per method")
     ax.grid(True, which="both", alpha=0.3)
@@ -246,14 +253,14 @@ def plot_per_method_curves(results, savedir):
         ax.plot(t, med_b, lw=1.4, color=color, ls="--",
                 label="background (median)")
         ax.fill_between(t, lo_b, hi_b, color=color, alpha=0.10,
-                        linewidth=0, label="background 16–84% band")
+                        linewidth=0, label="background 16-84% band")
         ax.plot(t, med_a, lw=2.0, color=color, label="analysis (median)")
         ax.fill_between(t, lo_a, hi_a, color=color, alpha=0.25,
-                        linewidth=0, label="analysis 16–84% band")
+                        linewidth=0, label="analysis 16-84% band")
         ax.set_xlabel("time")
         ax.set_ylabel("RMSE")
         ax.set_yscale("log")
-        ax.set_title(f"Lorenz96 — {m}\nanalysis vs background  ·  10 scenarios")
+        ax.set_title(f"Lorenz96 - {m}")
         ax.grid(True, which="both", alpha=0.3)
         ax.legend(loc="best", fontsize=9, frameon=True,
                   facecolor="white", edgecolor="0.85")
@@ -352,7 +359,7 @@ def plot_method_boxplot(results, savedir, burn_in_frac=0.30):
                       f"{n_steps - cutoff} steps)")
         ax.set_yscale(yscale)
         ax.set_title(
-            f"Lorenz96 — RMSE distribution across 10 scenarios  ·  "
+            f"Lorenz96 — RMSE distribution  ·  "
             f"burn-in = first {int(burn_in_frac*100)}% discarded  ·  "
             f"y-{yscale}"
         )
@@ -402,125 +409,12 @@ def _safe_name(s):
              .replace("=", "").replace(" ", "_"))
 
 
-def _radar_panel(ax, angles, truth, mean_b, mean_a,
-                 obs_indices, obs_values, F_shift,
-                 rmin, rmax, title):
-    ang_c = np.concatenate([angles, angles[:1]])
-    truth_c = np.concatenate([truth, truth[:1]]) + F_shift
-    mb_c    = np.concatenate([mean_b, mean_b[:1]]) + F_shift
-    ma_c    = np.concatenate([mean_a, mean_a[:1]]) + F_shift
-    ax.plot(ang_c, mb_c, color="#7a7a7a", lw=1.3, ls="--",
-            label="background mean", zorder=2)
-    ax.plot(ang_c, truth_c, color="#111111", lw=2.2,
-            label="truth", zorder=4)
-    ax.plot(ang_c, ma_c, color="#1f4ed8", lw=1.8,
-            label="analysis mean", zorder=5)
-    if obs_indices is not None and len(obs_indices) > 0:
-        obs_ang = angles[obs_indices]
-        obs_r = obs_values + F_shift
-        ax.scatter(obs_ang, obs_r,
-                   s=28, color="#dc2626",
-                   edgecolor="white", linewidth=0.8,
-                   zorder=6, label="observations")
-    ax.set_ylim(rmin, rmax)
-    ax.set_theta_zero_location("N")
-    ax.set_theta_direction(-1)
-    ax.set_xticks(angles[::5])
-    ax.set_xticklabels([str(i) for i in range(0, len(angles), 5)],
-                       fontsize=14, color="#222", fontweight="bold")
-    ax.set_yticklabels([])
-    ax.tick_params(axis="x", pad=10)
-    ax.grid(True, alpha=0.32, color="#bbbbbb", linestyle=":")
-    ax.spines["polar"].set_color("#cccccc")
-    ax.spines["polar"].set_linewidth(0.8)
-    ax.set_title(title, fontsize=12, pad=14, fontweight="bold",
-                 color="#222222")
-
-
-def plot_radar_per_method(scenarios, results, savedir,
-                           n_top=N_TOP_METHODS, scenario_id=0):
-    summary = results.summary_table().sort_values("mean_rmse_a")
-    top_methods = summary.head(n_top)["method"].tolist()
-    rows_by_method = {}
-    for row in results.rows:
-        if (row["method"] in top_methods
-                and row["scenario_id"] == scenario_id
-                and "Xa_snapshots" in row):
-            rows_by_method[row["method"]] = row
-    if not rows_by_method:
-        print("  [radar] no snapshots stored — skipping")
-        return
-    scen = scenarios[scenario_id]
-    n_state = scen.n_state
-    F_shift = 8.0
-    all_vals = []
-    for row in rows_by_method.values():
-        all_vals.append(row["Xa_snapshots"].ravel())
-    for k in range(scen.n_steps):
-        all_vals.append(np.asarray(scen.truth_trajectory[k]))
-    vmin = min(arr.min() for arr in all_vals) + F_shift
-    vmax = max(arr.max() for arr in all_vals) + F_shift
-    rmin = max(0.0, vmin - 0.5)
-    rmax = vmax + 0.5
-    angles = np.linspace(0, 2 * np.pi, n_state, endpoint=False)
-    radar_dir = os.path.join(savedir, "radars")
-    os.makedirs(radar_dir, exist_ok=True)
-    op_indices = None
-    if hasattr(scen.operators[0], "indices"):
-        op_indices = np.asarray(scen.operators[0].indices)
-    for method, row in rows_by_method.items():
-        Xb = row["Xb_snapshots"]
-        Xa = row["Xa_snapshots"]
-        snap_steps = row["snapshot_steps"]
-        snap_times = row["snapshot_times"]
-        snap_fracs = row["snapshot_fractions"]
-        for ci in range(Xa.shape[0]):
-            step = int(snap_steps[ci])
-            t_at = float(snap_times[ci])
-            frac_pct = int(round(float(snap_fracs[ci]) * 100))
-            mean_b = Xb[ci].mean(axis=1)
-            mean_a = Xa[ci].mean(axis=1)
-            truth = np.asarray(scen.truth_trajectory[step])
-            obs_vals = None
-            obs_idx = op_indices
-            if obs_idx is not None:
-                y_k = np.asarray(scen.observations[step])
-                obs_vals = y_k
-            fig = plt.figure(figsize=(6.4, 6.4), facecolor="white")
-            ax = fig.add_subplot(111, projection="polar")
-            title = (f"{method}   ·   t = {t_at:.2f}   ({frac_pct:>3d}%)")
-            _radar_panel(
-                ax, angles,
-                truth=truth,
-                mean_b=mean_b, mean_a=mean_a,
-                obs_indices=obs_idx, obs_values=obs_vals,
-                F_shift=F_shift, rmin=rmin, rmax=rmax,
-                title=title,
-            )
-            handles = [
-                plt.Line2D([], [], color="#111111", lw=2.2, label="truth"),
-                plt.Line2D([], [], color="#1f4ed8", lw=1.8, label="analysis mean"),
-                plt.Line2D([], [], color="#7a7a7a", lw=1.3, ls="--",
-                           label="background mean"),
-                plt.Line2D([], [], marker="o", linestyle="",
-                           markerfacecolor="#dc2626",
-                           markeredgecolor="white", markersize=7,
-                           label="observations"),
-            ]
-            fig.legend(handles=handles, loc="lower center", ncol=4,
-                       frameon=False, fontsize=9, bbox_to_anchor=(0.5, 0.01))
-            fig.tight_layout(rect=[0, 0.06, 1, 0.99])
-            fname = f"radar_{_safe_name(method)}_t{frac_pct:03d}.png"
-            out = os.path.join(radar_dir, fname)
-            fig.savefig(out, dpi=140, bbox_inches="tight",
-                        facecolor="white")
-            plt.close(fig)
-        print(f"  saved {Xa.shape[0]} radars for method '{method}' "
-              f"in {radar_dir}/")
-
-
 def main():
     os.makedirs(FIG_DIR, exist_ok=True)
+    print(f"  output folder: {FIG_DIR}")
+    print(f"  Cholesky regression: method={CHOL_METHOD}, tol={CHOL_TOL}")
+    print(f"  CSV metrics: burn-in = first {int(BURN_IN_FRAC*100)}% of "
+          f"cycles discarded (post-spin-up)")
     model, scenarios = build_scenarios()
     results = run_benchmark(scenarios)
 
@@ -528,7 +422,7 @@ def main():
     print("=" * 72)
     print(" Exporting CSVs")
     print("=" * 72)
-    written = results.export_csv(FIG_DIR)
+    written = results.export_csv(FIG_DIR, burn_in_frac=BURN_IN_FRAC)
     for name, path in written.items():
         print(f"  saved {path}")
 
@@ -539,14 +433,13 @@ def main():
     plot_rmse_evolution(results, FIG_DIR)
     plot_analysis_vs_background(results, FIG_DIR)
     plot_per_method_curves(results, FIG_DIR)
-    plot_method_boxplot(results, FIG_DIR, burn_in_frac=0.30)
+    plot_method_boxplot(results, FIG_DIR, burn_in_frac=BURN_IN_FRAC)
     plot_spread_vs_error(results, FIG_DIR)
 
     summary = results.summary_table().sort_values("mean_rmse_a")
     best = summary.iloc[0]["method"]
     print(f"  best method by mean_rmse_a: {best}")
     plot_rank_histogram_per_method(results, FIG_DIR)
-    plot_radar_per_method(scenarios, results, FIG_DIR, n_top=N_TOP_METHODS)
 
     print()
     print("Done. Figures in:", os.path.abspath(FIG_DIR))

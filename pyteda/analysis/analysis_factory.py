@@ -5,6 +5,7 @@ from . import (
     analysis_enkf,
     analysis_enkf_bloc,
     analysis_enkf_modified_cholesky,
+    analysis_enkf_obs_modified_cholesky,
     analysis_enkf_cholesky,
     analysis_enkf_naive,
     analysis_lenkf,
