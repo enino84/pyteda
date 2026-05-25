@@ -164,6 +164,7 @@ class Simulation:
         method_rng: Optional[np.random.Generator] = None,
         store_diagnostics: bool = False,
         store_states_at=None,
+        adaptive_inflation=None,
     ):
         # ----- Mode selection -----
         if scenario is not None:
@@ -208,6 +209,11 @@ class Simulation:
             self.truth_states = [] if self.store_ref_state else None
             self._stored_indices = []
 
+        # ----- Adaptive inflation (framework-level, filter-agnostic) -----
+        # When provided, overrides the fixed inflation_factor each cycle by
+        # an innovation-based estimate applied uniformly to every method.
+        self.adaptive_inflation = adaptive_inflation
+
         # ----- Logging -----
         self.logger = logging.getLogger("Simulation")
         handler = logging.StreamHandler()
@@ -236,6 +242,7 @@ class Simulation:
         log_level: int = logging.WARNING,
         store_diagnostics: bool = False,
         store_states_at=None,
+        adaptive_inflation=None,
     ) -> "Simulation":
         """Create a scenario-based Simulation."""
         return cls(
@@ -246,6 +253,7 @@ class Simulation:
             log_level=log_level,
             store_diagnostics=store_diagnostics,
             store_states_at=store_states_at,
+            adaptive_inflation=adaptive_inflation,
         )
 
     # ------------------------------------------------------------------
@@ -375,7 +383,8 @@ class Simulation:
 
             # We may need the full background ensemble for diagnostics, for
             # snapshots, or for both — fetch it at most once per step.
-            need_Xb = self.store_diagnostics or (k in self._snap_index)
+            need_Xb = (self.store_diagnostics or (k in self._snap_index)
+                       or self.adaptive_inflation is not None)
             if need_Xb:
                 Xb = bg.get_ensemble()
                 if self.store_diagnostics:
@@ -385,9 +394,26 @@ class Simulation:
                 if k in self._snap_index:
                     self.Xb_snapshots[self._snap_index[k]] = Xb
 
+            # Adaptive inflation: derive this cycle's factor from the
+            # innovation BEFORE assimilation, applied identically to every
+            # method. Falls back to the fixed factor on any failure.
+            if self.adaptive_inflation is not None:
+                try:
+                    H = obs_k.linearize(xbk) if hasattr(obs_k, "linearize") \
+                        else obs_k.get_observation_operator()
+                    if hasattr(obs_k, "noise") and hasattr(obs_k.noise, "R_diag"):
+                        trR = float(np.sum(obs_k.noise.R_diag))
+                    else:
+                        trR = float(np.trace(obs_k.get_data_error_covariance()))
+                    inf_k = self.adaptive_inflation.update(Xb, H, y_k, trR)
+                except Exception:
+                    inf_k = self.inflation_factor
+            else:
+                inf_k = self.inflation_factor
+
             self.analysis.perform_assimilation(bg, obs_k)
-            if self.inflation_factor > 0:
-                self.analysis.inflate_ensemble(self.inflation_factor)
+            if inf_k > 0:
+                self.analysis.inflate_ensemble(inf_k)
 
             xak = self.analysis.get_analysis_state()
             self.error_a[k] = _rmse_relative(x_true, xak)

@@ -33,7 +33,17 @@ NOISE_STD       = 0.01
 ENSEMBLE_SIZE   = 20
 OBS_FREQ        = 0.30
 END_TIME        = 50.0
-INFLATION       = 1.04
+INFLATION       = 1.14
+
+# Adaptive multiplicative inflation (framework-level, innovation-based).
+# When this is a dict, it OVERRIDES the fixed INFLATION above and is applied
+# uniformly to EVERY method each cycle (fair comparison). Set to None to fall
+# back to the fixed INFLATION factor.
+#   lambda0 : initial factor          gain : smoothing of the recursion
+#   lo, hi  : clip bounds for the factor
+# Note: tuned for NOISE_STD~0.05. With small NOISE_STD (e.g. 0.01) consider
+# lowering `hi` (e.g. 1.4) if you see over-inflation in spread_error_ratio.
+ADAPTIVE_INFLATION = dict(lambda0=1.04, gain=0.15, lo=1.0, hi=1.6)
 
 # Fraction of initial (spin-up) cycles discarded when computing the
 # time-averaged CSV metrics (mean_rmse_a, mean_spread_a, CRPS, and the
@@ -51,7 +61,7 @@ SPINUP_ENSEMBLE = 10.0
 
 # Observation network: strided sampling, observe 1 of every SPACING
 # variables (spacing=2 -> 20 of 40 = 50%; spacing=3 -> ~35%).
-SPACING         = 3
+SPACING         = 2
 
 # Modified-Cholesky regression method for the Cholesky-based filters
 # (EnKF-MC and the three precision-space shrinkage criteria): solve each
@@ -71,14 +81,17 @@ N_TOP_METHODS   = 6
 METHODS = {
 
     "EnKF-OBS-MC(r=2)": dict(method="enkf-obs-modified-cholesky",
-                            r=2, r_state=2, b_via_cholesky=True, alpha=0.01),
-                            
+                            r=3, r_state=3, b_via_cholesky=True, alpha=0.1),
+
+    "EnKF-OBS-MC-LOCAL(r=2)": dict(method="enkf-obs-modified-cholesky-local",
+                            r=2, alpha=0.1),
+
     # Plain stochastic EnKF and its variants without shrinkage
     "EnKF-BLoc":            dict(method="enkf-b-loc"),
 
-    # Localised filters
-    "LEnKF(r=2)":           dict(method="lenkf", r=2),
-    "LETKF(r=2)":           dict(method="letkf", r=2),
+    # Localised filters  (labels match the actual radius below)
+    "LEnKF(r=3)":           dict(method="lenkf", r=3),
+    "LETKF(r=3)":           dict(method="letkf", r=3),
 }
 
 FIG_DIR = f"lorenz96_mc_obs_sp{SPACING}_" + datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -130,6 +143,10 @@ def run_benchmark(scenarios):
     print("=" * 72)
     print(f" Running benchmark — {len(METHODS)} methods × "
           f"{len(scenarios)} scenarios = {n_cells} cells")
+    if ADAPTIVE_INFLATION is not None:
+        print(f" Adaptive inflation: {ADAPTIVE_INFLATION}")
+    else:
+        print(f" Fixed inflation factor: {INFLATION}")
     print("=" * 72)
 
     results = Benchmark(
@@ -142,6 +159,7 @@ def run_benchmark(scenarios):
         verbose=False,
         store_diagnostics=True,
         store_states_at=SNAP_FRACTIONS,
+        adaptive_inflation_cfg=ADAPTIVE_INFLATION,
     ).run()
 
     print()

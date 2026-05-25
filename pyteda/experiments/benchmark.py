@@ -44,36 +44,96 @@ def _run_one_cell(
     inflation_factor: float,
     store_diagnostics: bool = False,
     store_states_at=None,
+    adaptive_inflation_cfg=None,
 ):
-    """Run one (scenario, method, run) cell and return a dict of results."""
-    cfg = dict(method_cfg)
-    method = cfg.pop("method")
-    # Inject the model from the scenario if the analysis class needs it.
-    cfg.setdefault("model", scenario.model)
-    analysis = AnalysisFactory(method, **cfg).create_analysis()
+    """Run one (scenario, method, run) cell and return a dict of results.
 
-    method_rng = np.random.default_rng(method_seed)
-    t0 = time.perf_counter()
-    sim = Simulation.from_scenario(
-        scenario,
-        analysis,
-        inflation_factor=inflation_factor,
-        method_rng=method_rng,
-        store_diagnostics=store_diagnostics,
-        store_states_at=store_states_at,
-    )
-    sim.run()
-    elapsed = time.perf_counter() - t0
-    errb, erra = sim.get_errors()
+    If the method diverges or raises (e.g. SVD non-convergence, overflow to
+    NaN/inf), the cell is recorded with NaN-filled curves instead of
+    propagating the exception, so one failing method never aborts the whole
+    benchmark.
+    """
+    times = np.asarray(scenario.times)
+    n_steps = times.size
+
+    def _failed_cell(reason: str, elapsed: float = float("nan")):
+        """Build a result row of NaNs for a diverged/failed method."""
+        nan_curve = np.full(n_steps, np.nan, dtype=float)
+        row = {
+            "scenario_id": scenario_id,
+            "method": method_name,
+            "run_id": run_id,
+            "method_seed": method_seed,
+            "elapsed": elapsed,
+            "times": times,
+            "error_b": nan_curve.copy(),
+            "error_a": nan_curve.copy(),
+            "failed": True,
+            "fail_reason": reason,
+        }
+        if store_diagnostics:
+            row["spread_b"] = nan_curve.copy()
+            row["spread_a"] = nan_curve.copy()
+            row["crps_b"] = nan_curve.copy()
+            row["crps_a"] = nan_curve.copy()
+            # Rank counts: zeros (no valid ranks accumulated).
+            row["rank_counts_b"] = np.zeros(1, dtype=float)
+            row["rank_counts_a"] = np.zeros(1, dtype=float)
+        return row
+
+    try:
+        cfg = dict(method_cfg)
+        method = cfg.pop("method")
+        # Inject the model from the scenario if the analysis class needs it.
+        cfg.setdefault("model", scenario.model)
+        analysis = AnalysisFactory(method, **cfg).create_analysis()
+
+        # Fresh adaptive-inflation estimator per cell (no state leaks between
+        # methods/scenarios). Same config for every method -> fair comparison.
+        adaptive_inflation = None
+        if adaptive_inflation_cfg is not None:
+            from ..simulation.adaptive_inflation import AdaptiveInflation
+            adaptive_inflation = AdaptiveInflation(**adaptive_inflation_cfg)
+
+        method_rng = np.random.default_rng(method_seed)
+        t0 = time.perf_counter()
+        sim = Simulation.from_scenario(
+            scenario,
+            analysis,
+            inflation_factor=inflation_factor,
+            method_rng=method_rng,
+            store_diagnostics=store_diagnostics,
+            store_states_at=store_states_at,
+            adaptive_inflation=adaptive_inflation,
+        )
+        sim.run()
+        elapsed = time.perf_counter() - t0
+        errb, erra = sim.get_errors()
+    except Exception as exc:  # noqa: BLE001 - we want to catch ANY divergence
+        elapsed = (time.perf_counter() - t0) if "t0" in dir() else float("nan")
+        print(f"  [Benchmark] method '{method_name}' FAILED "
+              f"({type(exc).__name__}: {exc}); recording NaN and continuing.")
+        return _failed_cell(f"{type(exc).__name__}: {exc}", elapsed)
+
+    # A method can also "diverge" without raising: NaN/inf in the error curve.
+    erra = np.asarray(erra)
+    errb = np.asarray(errb)
+    if not np.all(np.isfinite(erra)):
+        print(f"  [Benchmark] method '{method_name}' DIVERGED "
+              f"(non-finite RMSE); recording NaN and continuing.")
+        return _failed_cell("non-finite analysis RMSE", elapsed)
+
     out = {
         "scenario_id": scenario_id,
         "method": method_name,
         "run_id": run_id,
         "method_seed": method_seed,
         "elapsed": elapsed,
-        "times": np.asarray(scenario.times),
-        "error_b": np.asarray(errb),
-        "error_a": np.asarray(erra),
+        "times": times,
+        "error_b": errb,
+        "error_a": erra,
+        "failed": False,
+        "fail_reason": "",
     }
     if store_diagnostics:
         out["spread_b"] = np.asarray(sim.spread_b)
@@ -528,6 +588,7 @@ class Benchmark:
         verbose: bool = True,
         store_diagnostics: bool = False,
         store_states_at=None,
+        adaptive_inflation_cfg=None,
     ):
         if not scenarios:
             raise ValueError("Provide at least one scenario.")
@@ -543,6 +604,9 @@ class Benchmark:
         self.verbose = bool(verbose)
         self.store_diagnostics = bool(store_diagnostics)
         self.store_states_at = store_states_at
+        # When not None, a dict of kwargs for AdaptiveInflation; the SAME
+        # config is used for every method so comparisons stay fair.
+        self.adaptive_inflation_cfg = adaptive_inflation_cfg
 
     def _build_cells(self):
         cells = []
@@ -572,7 +636,8 @@ class Benchmark:
                     delayed(_run_one_cell)(s, sid, mn, cfg, rid, seed,
                                            self.inflation_factor,
                                            self.store_diagnostics,
-                                           self.store_states_at)
+                                           self.store_states_at,
+                                           self.adaptive_inflation_cfg)
                     for (s, sid, mn, cfg, rid, seed) in cells
                 )
             except ImportError:
@@ -597,5 +662,6 @@ class Benchmark:
             rows.append(_run_one_cell(s, sid, mn, cfg, rid, seed,
                                       self.inflation_factor,
                                       self.store_diagnostics,
-                                      self.store_states_at))
+                                      self.store_states_at,
+                                      self.adaptive_inflation_cfg))
         return rows
