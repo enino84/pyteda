@@ -51,7 +51,7 @@ SPINUP_ENSEMBLE = 10.0
 
 # Observation network: strided sampling, observe 1 of every SPACING
 # variables (spacing=2 -> 20 of 40 = 50%; spacing=3 -> ~35%).
-SPACING         = 2
+SPACING         = 3
 
 # Modified-Cholesky regression method for the Cholesky-based filters
 # (EnKF-MC and the three precision-space shrinkage criteria): solve each
