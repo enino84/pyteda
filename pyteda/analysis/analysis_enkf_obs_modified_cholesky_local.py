@@ -166,7 +166,8 @@ class AnalysisEnKFObsModifiedCholeskyLocal(Analysis):
     # ------------------------------------------------------------------
     # One local analysis (centred on state component i)
     # ------------------------------------------------------------------
-    def _local_analysis(self, Xb, H_index, R_value, y_full, i, ensemble_size):
+    def _local_analysis(self, Xb, state_to_obs, R_value, y_full, eps_full, i,
+                        ensemble_size):
         """Assimilate the observations inside the domain of state ``i`` and
         return the updated local ensemble together with the centre index.
 
@@ -182,17 +183,13 @@ class AnalysisEnKFObsModifiedCholeskyLocal(Analysis):
         DXi = Xbi - xbi                                   # (n_local, N)
 
         # Local observations: those whose observed state index lies in si.
-        H_set = set(int(s) for s in H_index)
-        # Global state indices that are observed AND in this domain:
-        obs_state_idx = [int(s) for s in si if int(s) in H_set]
+        # ``state_to_obs`` is precomputed ONCE per assimilation (passed in),
+        # so the per-component cost is only over the small local domain si,
+        # not over all m observations -- essential for high-dim models (SWE).
+        obs_state_idx = [s for s in si.tolist() if s in state_to_obs]
         if len(obs_state_idx) == 0:
             return Xbi, center_pos              # no local obs: background
 
-        # Position of each observed state index within the observation vector
-        # (H_index maps observation row -> state index it samples).
-        H_index = np.asarray(H_index, dtype=int)
-        # Map state index -> observation row.
-        state_to_obs = {int(s): r for r, s in enumerate(H_index)}
         obs_rows = np.array([state_to_obs[s] for s in obs_state_idx], dtype=int)
         # Local rows within the domain (position of each observed state in si).
         si_pos = {int(s): p for p, s in enumerate(si)}
@@ -209,8 +206,12 @@ class AnalysisEnKFObsModifiedCholeskyLocal(Analysis):
 
         # Local observations and perturbed innovations.
         yi = y_full[obs_rows]                              # (m_local,)
-        # Perturbed observation noise, isotropic local R = R_value * I.
-        eps = np.sqrt(R_value) * np.random.standard_normal((m_local, ensemble_size))
+        # Perturbed observation noise: SELECT the local rows from the
+        # per-cycle perturbation matrix sampled ONCE in perform_assimilation.
+        # We never draw randomness inside the per-domain loop, so the global
+        # numpy RNG stream is consumed exactly once per cycle (as in the other
+        # filters) and the benchmark stays reproducible and method-comparable.
+        eps = eps_full[obs_rows, :]                        # (m_local, N)
         # Full innovations for the update (mean retained).
         Di = (yi[:, None] + eps) - HXbi                    # (m_local, N)
         # Centred innovations ~ N(0, S_local) for precision estimation.
@@ -254,10 +255,27 @@ class AnalysisEnKFObsModifiedCholeskyLocal(Analysis):
         else:
             R_value = float(observation.R[0, 0])
 
+        # Sample the observation-error perturbations ONCE for the whole cycle,
+        # using the framework's noise model (same global-RNG stream as the
+        # other filters via sample_many_legacy). Each local domain then SELECTS
+        # its rows from this matrix; no randomness is drawn inside the loop, so
+        # the RNG stream is not desynchronised across methods. Falls back to a
+        # direct draw only if the noise model lacks the legacy sampler.
+        if hasattr(observation, "noise") and \
+                hasattr(observation.noise, "sample_many_legacy"):
+            eps_full = observation.noise.sample_many_legacy(ensemble_size)
+        else:
+            eps_full = np.sqrt(R_value) * np.random.standard_normal(
+                (len(np.asarray(H_index)), ensemble_size)
+            )
+
         Xa = np.empty_like(Xb)
+        # Precompute the state-index -> observation-row map ONCE.
+        H_index_arr = np.asarray(H_index, dtype=int)
+        state_to_obs = {int(s): r for r, s in enumerate(H_index_arr)}
         for i in range(n):
             Xai, center_pos = self._local_analysis(
-                Xb, H_index, R_value, y_full, i, ensemble_size
+                Xb, state_to_obs, R_value, y_full, eps_full, i, ensemble_size
             )
             Xa[i, :] = Xai[center_pos, :]
 
