@@ -55,6 +55,8 @@ def _run_one_cell(
     """
     times = np.asarray(scenario.times)
     n_steps = times.size
+    var_blocks = scenario.model.var_blocks
+    var_names = list(var_blocks.keys())
 
     def _failed_cell(reason: str, elapsed: float = float("nan")):
         """Build a result row of NaNs for a diverged/failed method."""
@@ -68,6 +70,8 @@ def _run_one_cell(
             "times": times,
             "error_b": nan_curve.copy(),
             "error_a": nan_curve.copy(),
+            "error_b_by_var": {v: nan_curve.copy() for v in var_names},
+            "error_a_by_var": {v: nan_curve.copy() for v in var_names},
             "failed": True,
             "fail_reason": reason,
         }
@@ -79,6 +83,12 @@ def _run_one_cell(
             # Rank counts: zeros (no valid ranks accumulated).
             row["rank_counts_b"] = np.zeros(1, dtype=float)
             row["rank_counts_a"] = np.zeros(1, dtype=float)
+            row["spread_b_by_var"] = {v: nan_curve.copy() for v in var_names}
+            row["spread_a_by_var"] = {v: nan_curve.copy() for v in var_names}
+            row["crps_b_by_var"] = {v: nan_curve.copy() for v in var_names}
+            row["crps_a_by_var"] = {v: nan_curve.copy() for v in var_names}
+            row["rank_counts_b_by_var"] = {v: np.zeros(1, dtype=float) for v in var_names}
+            row["rank_counts_a_by_var"] = {v: np.zeros(1, dtype=float) for v in var_names}
         return row
 
     try:
@@ -132,6 +142,8 @@ def _run_one_cell(
         "times": times,
         "error_b": errb,
         "error_a": erra,
+        "error_b_by_var": dict(sim.error_b_by_var),
+        "error_a_by_var": dict(sim.error_a_by_var),
         "failed": False,
         "fail_reason": "",
     }
@@ -142,6 +154,12 @@ def _run_one_cell(
         out["crps_a"] = np.asarray(sim.crps_a)
         out["rank_counts_b"] = np.asarray(sim.rank_counts_b)
         out["rank_counts_a"] = np.asarray(sim.rank_counts_a)
+        out["spread_b_by_var"] = dict(sim.spread_b_by_var)
+        out["spread_a_by_var"] = dict(sim.spread_a_by_var)
+        out["crps_b_by_var"] = dict(sim.crps_b_by_var)
+        out["crps_a_by_var"] = dict(sim.crps_a_by_var)
+        out["rank_counts_b_by_var"] = dict(sim.rank_counts_b_by_var)
+        out["rank_counts_a_by_var"] = dict(sim.rank_counts_a_by_var)
     if sim.snapshot_steps.size > 0:
         out["Xb_snapshots"] = np.asarray(sim.Xb_snapshots)
         out["Xa_snapshots"] = np.asarray(sim.Xa_snapshots)
@@ -168,7 +186,13 @@ class BenchmarkResults:
         return pd
 
     def to_dataframe(self):
-        """Long-form DataFrame: one row per (scenario, method, run, step)."""
+        """Long-form DataFrame: one row per (scenario, method, run, step, variable).
+
+        The ``variable`` column is ``"global"`` for the whole-state relative
+        RMSE (the legacy number, kept as a divergence sentinel) plus one entry
+        per state variable (e.g. ``u``, ``v``, ``h``) with that field's own
+        relative error. Single-variable models emit ``global`` and one block.
+        """
         pd = self._pd()
         records = []
         for r in self.rows:
@@ -179,9 +203,24 @@ class BenchmarkResults:
                     "run_id": r["run_id"],
                     "step": k,
                     "t": float(t),
+                    "variable": "global",
                     "error_b": float(eb),
                     "error_a": float(ea),
                 })
+            for name in r["error_a_by_var"]:
+                eb_v = r["error_b_by_var"][name]
+                ea_v = r["error_a_by_var"][name]
+                for k, t in enumerate(r["times"]):
+                    records.append({
+                        "scenario_id": r["scenario_id"],
+                        "method": r["method"],
+                        "run_id": r["run_id"],
+                        "step": k,
+                        "t": float(t),
+                        "variable": name,
+                        "error_b": float(eb_v[k]),
+                        "error_a": float(ea_v[k]),
+                    })
         return pd.DataFrame.from_records(records)
 
     def summary_table(self, kind: str = "mean"):
@@ -218,6 +257,7 @@ class BenchmarkResults:
         from scipy import stats
 
         df = self.to_dataframe()
+        df = df[df["variable"] == "global"]
         agg = (df.groupby(["method", "scenario_id", "run_id"])["error_a"]
                  .mean().reset_index())
         a = agg[agg.method == method_a].sort_values(["scenario_id", "run_id"])
@@ -240,14 +280,18 @@ class BenchmarkResults:
             "n_pairs": int(len(diff)),
         }
 
-    def plot_error_curves(self, ax=None, kind: str = "analysis", q_low=0.25, q_high=0.75):
+    def plot_error_curves(self, ax=None, kind: str = "analysis", q_low=0.25, q_high=0.75,
+                          variable: str = "global"):
         """Plot mean error curves with an inter-quartile band per method.
 
         Aggregates over (scenario, run) to produce one curve per method.
+        ``variable`` selects which series to plot: ``"global"`` (default) or a
+        state-variable name such as ``"u"``, ``"v"``, ``"h"``.
         """
         import matplotlib.pyplot as plt
 
         df = self.to_dataframe()
+        df = df[df["variable"] == variable]
         col = "error_a" if kind == "analysis" else "error_b"
         agg = (df.groupby(["method", "step", "t"])[col]
                  .agg(median="median", q_low=lambda s: s.quantile(q_low),
@@ -416,6 +460,23 @@ class BenchmarkResults:
                     rec["mean_spread_a"] / rec["mean_rmse_a"]
                     if rec["mean_rmse_a"] > 0 else float("nan")
                 )
+            # Per-variable mean RMSE (and diagnostics) as wide columns, e.g.
+            # mean_rmse_a_u, mean_rmse_a_h, ... so a method that lowers the
+            # global RMSE at the cost of one field is visible at a glance.
+            for name, curve in r["error_a_by_var"].items():
+                rec[f"mean_rmse_a_{name}"] = float(np.mean(_post(curve)))
+            for name, curve in r["error_b_by_var"].items():
+                rec[f"mean_rmse_b_{name}"] = float(np.mean(_post(curve)))
+            if has_diag:
+                for name, curve in r["spread_a_by_var"].items():
+                    sa = float(np.mean(_post(curve)))
+                    rec[f"mean_spread_a_{name}"] = sa
+                    ra = rec[f"mean_rmse_a_{name}"]
+                    rec[f"spread_error_ratio_a_{name}"] = (
+                        sa / ra if ra > 0 else float("nan")
+                    )
+                for name, curve in r["crps_a_by_var"].items():
+                    rec[f"mean_crps_a_{name}"] = float(np.mean(_post(curve)))
             cell_records.append(rec)
         summary_path = out_dir / "summary.csv"
         pd.DataFrame.from_records(cell_records).to_csv(
@@ -438,26 +499,41 @@ class BenchmarkResults:
             )
             written["diagnostics_summary"] = diag_path
 
-        # 4. Long-format per-step table
+        # 4. Long-format per-step table (one row per step × variable)
         long_records = []
         for r in self.rows:
             n_steps = len(r["error_a"])
             for k in range(n_steps):
-                entry = {
+                base = {
                     "method":      r["method"],
                     "scenario_id": r["scenario_id"],
                     "run_id":      r["run_id"],
                     "step":        k,
                     "time":        float(r["times"][k]),
-                    "error_b":     float(r["error_b"][k]),
-                    "error_a":     float(r["error_a"][k]),
                 }
+                # "global" row (whole-state relative RMSE).
+                entry = dict(base)
+                entry["variable"] = "global"
+                entry["error_b"] = float(r["error_b"][k])
+                entry["error_a"] = float(r["error_a"][k])
                 if has_diag:
                     entry["spread_b"] = float(r["spread_b"][k])
                     entry["spread_a"] = float(r["spread_a"][k])
                     entry["crps_b"]   = float(r["crps_b"][k])
                     entry["crps_a"]   = float(r["crps_a"][k])
                 long_records.append(entry)
+                # One row per state variable.
+                for name in r["error_a_by_var"]:
+                    e = dict(base)
+                    e["variable"] = name
+                    e["error_b"] = float(r["error_b_by_var"][name][k])
+                    e["error_a"] = float(r["error_a_by_var"][name][k])
+                    if has_diag:
+                        e["spread_b"] = float(r["spread_b_by_var"][name][k])
+                        e["spread_a"] = float(r["spread_a_by_var"][name][k])
+                        e["crps_b"]   = float(r["crps_b_by_var"][name][k])
+                        e["crps_a"]   = float(r["crps_a_by_var"][name][k])
+                    long_records.append(e)
         curves_path = out_dir / "error_curves.csv"
         pd.DataFrame.from_records(long_records).to_csv(
             curves_path, index=False, float_format="%.6g",
