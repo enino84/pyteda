@@ -1,0 +1,355 @@
+--- a/pyteda/simulation/simulation_core.py	2026-06-19 01:03:26.174032829 +0000
++++ pyteda/simulation/simulation_core.py	2026-06-19 01:04:18.966084042 +0000
+@@ -43,6 +43,21 @@
+     return float(np.linalg.norm(xs - xr) / np.linalg.norm(xr))
+ 
+ 
++def _rmse_relative_by_var(xr: np.ndarray, xs: np.ndarray, var_blocks) -> dict:
++    """Relative RMSE computed independently per variable block.
++
++    Each variable is normalized by the norm of its OWN truth block, so a
++    large-magnitude field (e.g. geopotential height) no longer dominates a
++    small-magnitude one (e.g. velocity). For a single-block model this
++    returns exactly one entry equal to the global ``_rmse_relative``.
++    """
++    out = {}
++    for name, sl in var_blocks.items():
++        denom = np.linalg.norm(xr[sl])
++        out[name] = float(np.linalg.norm(xs[sl] - xr[sl]) / denom) if denom > 0 else float("nan")
++    return out
++
++
+ def _ensemble_spread(X: np.ndarray) -> float:
+     """RMS of the per-component ensemble standard deviation.
+ 
+@@ -55,6 +70,22 @@
+     return float(np.sqrt(np.mean(sigma ** 2)))
+ 
+ 
++def _ensemble_spread_by_var(X: np.ndarray, x_true: np.ndarray, var_blocks) -> dict:
++    """Relative ensemble spread per variable block.
++
++    Returns ``||sigma[block]|| / ||x_true[block]||`` so it shares the same
++    normalization as ``_rmse_relative_by_var``. With that, the per-variable
++    spread/error ratio = spread/rmse is unit-invariant and ≈ 1 when the
++    block is well calibrated, regardless of the field's physical units.
++    """
++    sigma = np.std(X, axis=1, ddof=1)
++    out = {}
++    for name, sl in var_blocks.items():
++        denom = np.linalg.norm(x_true[sl])
++        out[name] = float(np.linalg.norm(sigma[sl]) / denom) if denom > 0 else float("nan")
++    return out
++
++
+ def _ensemble_crps(X: np.ndarray, x_true: np.ndarray) -> float:
+     """Continuous Ranked Probability Score, averaged over state components.
+ 
+@@ -80,6 +111,20 @@
+     return float(np.mean(crps_per_component))
+ 
+ 
++def _ensemble_crps_by_var(X: np.ndarray, x_true: np.ndarray, var_blocks) -> dict:
++    """CRPS per variable block, normalized by the block's RMS magnitude.
++
++    Dividing the mean CRPS of a block by ``RMS(x_true[block])`` puts every
++    field on a common, unit-free scale so they can be compared and averaged.
++    """
++    out = {}
++    for name, sl in var_blocks.items():
++        c = _ensemble_crps(X[sl], x_true[sl])
++        scale = float(np.sqrt(np.mean(x_true[sl] ** 2)))
++        out[name] = float(c / scale) if scale > 0 else float("nan")
++    return out
++
++
+ def _rank_counts(X: np.ndarray, x_true: np.ndarray, n_bins: int) -> np.ndarray:
+     """Per-component rank of truth among ensemble members, accumulated as histogram.
+ 
+@@ -104,6 +149,17 @@
+     return counts[:n_bins]
+ 
+ 
++def _rank_counts_by_var(X: np.ndarray, x_true: np.ndarray, n_bins: int, var_blocks) -> dict:
++    """One rank histogram per variable block.
++
++    Pooling ranks across fields of different magnitude (as the global
++    version does) corrupts the histogram. Restricting to a block keeps each
++    field's calibration interpretable on its own.
++    """
++    return {name: _rank_counts(X[sl], x_true[sl], n_bins)
++            for name, sl in var_blocks.items()}
++
++
+ def _resolve_snapshot_steps(
+     store_states_at, n_steps: int
+ ) -> np.ndarray:
+@@ -338,6 +394,13 @@
+         self.error_b = np.empty(K)
+         self.error_a = np.empty(K)
+ 
++        # Per-variable metric containers. var_blocks is {name: slice}; for a
++        # single-variable model this is one block and mirrors the global value.
++        vb = self.model.var_blocks
++        self.var_names = list(vb.keys())
++        self.error_b_by_var = {name: np.empty(K) for name in vb}
++        self.error_a_by_var = {name: np.empty(K) for name in vb}
++
+         if self.store_diagnostics:
+             # Per-step, per-component spread (root mean of variance over members).
+             self.spread_b = np.empty(K)
+@@ -349,6 +412,13 @@
+             # Range is 0..N (inclusive on both sides).
+             self.rank_counts_b = np.zeros(N + 1, dtype=np.int64)
+             self.rank_counts_a = np.zeros(N + 1, dtype=np.int64)
++            # Per-variable diagnostics.
++            self.spread_b_by_var = {name: np.empty(K) for name in vb}
++            self.spread_a_by_var = {name: np.empty(K) for name in vb}
++            self.crps_b_by_var = {name: np.empty(K) for name in vb}
++            self.crps_a_by_var = {name: np.empty(K) for name in vb}
++            self.rank_counts_b_by_var = {name: np.zeros(N + 1, dtype=np.int64) for name in vb}
++            self.rank_counts_a_by_var = {name: np.zeros(N + 1, dtype=np.int64) for name in vb}
+ 
+         # Snapshot machinery: pre-allocate stacked arrays once we know which
+         # steps will be captured.
+@@ -380,6 +450,9 @@
+             # Background mean and ensemble before assimilation
+             xbk = bg.get_background_state()
+             self.error_b[k] = _rmse_relative(x_true, xbk)
++            _eb = _rmse_relative_by_var(x_true, xbk, vb)
++            for name in vb:
++                self.error_b_by_var[name][k] = _eb[name]
+ 
+             # We may need the full background ensemble for diagnostics, for
+             # snapshots, or for both — fetch it at most once per step.
+@@ -391,6 +464,13 @@
+                     self.spread_b[k] = _ensemble_spread(Xb)
+                     self.crps_b[k] = _ensemble_crps(Xb, x_true)
+                     self.rank_counts_b += _rank_counts(Xb, x_true, n_bins=N + 1)
++                    _sb = _ensemble_spread_by_var(Xb, x_true, vb)
++                    _cb = _ensemble_crps_by_var(Xb, x_true, vb)
++                    _rb = _rank_counts_by_var(Xb, x_true, N + 1, vb)
++                    for name in vb:
++                        self.spread_b_by_var[name][k] = _sb[name]
++                        self.crps_b_by_var[name][k] = _cb[name]
++                        self.rank_counts_b_by_var[name] += _rb[name]
+                 if k in self._snap_index:
+                     self.Xb_snapshots[self._snap_index[k]] = Xb
+ 
+@@ -417,6 +497,9 @@
+ 
+             xak = self.analysis.get_analysis_state()
+             self.error_a[k] = _rmse_relative(x_true, xak)
++            _ea = _rmse_relative_by_var(x_true, xak, vb)
++            for name in vb:
++                self.error_a_by_var[name][k] = _ea[name]
+ 
+             need_Xa = self.store_diagnostics or (k in self._snap_index)
+             if need_Xa:
+@@ -425,6 +508,13 @@
+                     self.spread_a[k] = _ensemble_spread(Xa)
+                     self.crps_a[k] = _ensemble_crps(Xa, x_true)
+                     self.rank_counts_a += _rank_counts(Xa, x_true, n_bins=N + 1)
++                    _sa = _ensemble_spread_by_var(Xa, x_true, vb)
++                    _ca = _ensemble_crps_by_var(Xa, x_true, vb)
++                    _ra = _rank_counts_by_var(Xa, x_true, N + 1, vb)
++                    for name in vb:
++                        self.spread_a_by_var[name][k] = _sa[name]
++                        self.crps_a_by_var[name][k] = _ca[name]
++                        self.rank_counts_a_by_var[name] += _ra[name]
+                 if k in self._snap_index:
+                     self.Xa_snapshots[self._snap_index[k]] = Xa
+ 
+--- a/b/pyteda/experiments/benchmark.py	2026-06-19 01:03:26.176847286 +0000
++++ b/pyteda/experiments/benchmark.py	2026-06-19 01:05:30.853144881 +0000
+@@ -55,6 +55,8 @@
+     """
+     times = np.asarray(scenario.times)
+     n_steps = times.size
++    var_blocks = scenario.model.var_blocks
++    var_names = list(var_blocks.keys())
+ 
+     def _failed_cell(reason: str, elapsed: float = float("nan")):
+         """Build a result row of NaNs for a diverged/failed method."""
+@@ -68,6 +70,8 @@
+             "times": times,
+             "error_b": nan_curve.copy(),
+             "error_a": nan_curve.copy(),
++            "error_b_by_var": {v: nan_curve.copy() for v in var_names},
++            "error_a_by_var": {v: nan_curve.copy() for v in var_names},
+             "failed": True,
+             "fail_reason": reason,
+         }
+@@ -79,6 +83,12 @@
+             # Rank counts: zeros (no valid ranks accumulated).
+             row["rank_counts_b"] = np.zeros(1, dtype=float)
+             row["rank_counts_a"] = np.zeros(1, dtype=float)
++            row["spread_b_by_var"] = {v: nan_curve.copy() for v in var_names}
++            row["spread_a_by_var"] = {v: nan_curve.copy() for v in var_names}
++            row["crps_b_by_var"] = {v: nan_curve.copy() for v in var_names}
++            row["crps_a_by_var"] = {v: nan_curve.copy() for v in var_names}
++            row["rank_counts_b_by_var"] = {v: np.zeros(1, dtype=float) for v in var_names}
++            row["rank_counts_a_by_var"] = {v: np.zeros(1, dtype=float) for v in var_names}
+         return row
+ 
+     try:
+@@ -132,6 +142,8 @@
+         "times": times,
+         "error_b": errb,
+         "error_a": erra,
++        "error_b_by_var": dict(sim.error_b_by_var),
++        "error_a_by_var": dict(sim.error_a_by_var),
+         "failed": False,
+         "fail_reason": "",
+     }
+@@ -142,6 +154,12 @@
+         out["crps_a"] = np.asarray(sim.crps_a)
+         out["rank_counts_b"] = np.asarray(sim.rank_counts_b)
+         out["rank_counts_a"] = np.asarray(sim.rank_counts_a)
++        out["spread_b_by_var"] = dict(sim.spread_b_by_var)
++        out["spread_a_by_var"] = dict(sim.spread_a_by_var)
++        out["crps_b_by_var"] = dict(sim.crps_b_by_var)
++        out["crps_a_by_var"] = dict(sim.crps_a_by_var)
++        out["rank_counts_b_by_var"] = dict(sim.rank_counts_b_by_var)
++        out["rank_counts_a_by_var"] = dict(sim.rank_counts_a_by_var)
+     if sim.snapshot_steps.size > 0:
+         out["Xb_snapshots"] = np.asarray(sim.Xb_snapshots)
+         out["Xa_snapshots"] = np.asarray(sim.Xa_snapshots)
+@@ -168,7 +186,13 @@
+         return pd
+ 
+     def to_dataframe(self):
+-        """Long-form DataFrame: one row per (scenario, method, run, step)."""
++        """Long-form DataFrame: one row per (scenario, method, run, step, variable).
++
++        The ``variable`` column is ``"global"`` for the whole-state relative
++        RMSE (the legacy number, kept as a divergence sentinel) plus one entry
++        per state variable (e.g. ``u``, ``v``, ``h``) with that field's own
++        relative error. Single-variable models emit ``global`` and one block.
++        """
+         pd = self._pd()
+         records = []
+         for r in self.rows:
+@@ -179,9 +203,24 @@
+                     "run_id": r["run_id"],
+                     "step": k,
+                     "t": float(t),
++                    "variable": "global",
+                     "error_b": float(eb),
+                     "error_a": float(ea),
+                 })
++            for name in r["error_a_by_var"]:
++                eb_v = r["error_b_by_var"][name]
++                ea_v = r["error_a_by_var"][name]
++                for k, t in enumerate(r["times"]):
++                    records.append({
++                        "scenario_id": r["scenario_id"],
++                        "method": r["method"],
++                        "run_id": r["run_id"],
++                        "step": k,
++                        "t": float(t),
++                        "variable": name,
++                        "error_b": float(eb_v[k]),
++                        "error_a": float(ea_v[k]),
++                    })
+         return pd.DataFrame.from_records(records)
+ 
+     def summary_table(self, kind: str = "mean"):
+@@ -218,6 +257,7 @@
+         from scipy import stats
+ 
+         df = self.to_dataframe()
++        df = df[df["variable"] == "global"]
+         agg = (df.groupby(["method", "scenario_id", "run_id"])["error_a"]
+                  .mean().reset_index())
+         a = agg[agg.method == method_a].sort_values(["scenario_id", "run_id"])
+@@ -240,14 +280,18 @@
+             "n_pairs": int(len(diff)),
+         }
+ 
+-    def plot_error_curves(self, ax=None, kind: str = "analysis", q_low=0.25, q_high=0.75):
++    def plot_error_curves(self, ax=None, kind: str = "analysis", q_low=0.25, q_high=0.75,
++                          variable: str = "global"):
+         """Plot mean error curves with an inter-quartile band per method.
+ 
+         Aggregates over (scenario, run) to produce one curve per method.
++        ``variable`` selects which series to plot: ``"global"`` (default) or a
++        state-variable name such as ``"u"``, ``"v"``, ``"h"``.
+         """
+         import matplotlib.pyplot as plt
+ 
+         df = self.to_dataframe()
++        df = df[df["variable"] == variable]
+         col = "error_a" if kind == "analysis" else "error_b"
+         agg = (df.groupby(["method", "step", "t"])[col]
+                  .agg(median="median", q_low=lambda s: s.quantile(q_low),
+@@ -416,6 +460,23 @@
+                     rec["mean_spread_a"] / rec["mean_rmse_a"]
+                     if rec["mean_rmse_a"] > 0 else float("nan")
+                 )
++            # Per-variable mean RMSE (and diagnostics) as wide columns, e.g.
++            # mean_rmse_a_u, mean_rmse_a_h, ... so a method that lowers the
++            # global RMSE at the cost of one field is visible at a glance.
++            for name, curve in r["error_a_by_var"].items():
++                rec[f"mean_rmse_a_{name}"] = float(np.mean(_post(curve)))
++            for name, curve in r["error_b_by_var"].items():
++                rec[f"mean_rmse_b_{name}"] = float(np.mean(_post(curve)))
++            if has_diag:
++                for name, curve in r["spread_a_by_var"].items():
++                    sa = float(np.mean(_post(curve)))
++                    rec[f"mean_spread_a_{name}"] = sa
++                    ra = rec[f"mean_rmse_a_{name}"]
++                    rec[f"spread_error_ratio_a_{name}"] = (
++                        sa / ra if ra > 0 else float("nan")
++                    )
++                for name, curve in r["crps_a_by_var"].items():
++                    rec[f"mean_crps_a_{name}"] = float(np.mean(_post(curve)))
+             cell_records.append(rec)
+         summary_path = out_dir / "summary.csv"
+         pd.DataFrame.from_records(cell_records).to_csv(
+@@ -438,26 +499,41 @@
+             )
+             written["diagnostics_summary"] = diag_path
+ 
+-        # 4. Long-format per-step table
++        # 4. Long-format per-step table (one row per step × variable)
+         long_records = []
+         for r in self.rows:
+             n_steps = len(r["error_a"])
+             for k in range(n_steps):
+-                entry = {
++                base = {
+                     "method":      r["method"],
+                     "scenario_id": r["scenario_id"],
+                     "run_id":      r["run_id"],
+                     "step":        k,
+                     "time":        float(r["times"][k]),
+-                    "error_b":     float(r["error_b"][k]),
+-                    "error_a":     float(r["error_a"][k]),
+                 }
++                # "global" row (whole-state relative RMSE).
++                entry = dict(base)
++                entry["variable"] = "global"
++                entry["error_b"] = float(r["error_b"][k])
++                entry["error_a"] = float(r["error_a"][k])
+                 if has_diag:
+                     entry["spread_b"] = float(r["spread_b"][k])
+                     entry["spread_a"] = float(r["spread_a"][k])
+                     entry["crps_b"]   = float(r["crps_b"][k])
+                     entry["crps_a"]   = float(r["crps_a"][k])
+                 long_records.append(entry)
++                # One row per state variable.
++                for name in r["error_a_by_var"]:
++                    e = dict(base)
++                    e["variable"] = name
++                    e["error_b"] = float(r["error_b_by_var"][name][k])
++                    e["error_a"] = float(r["error_a_by_var"][name][k])
++                    if has_diag:
++                        e["spread_b"] = float(r["spread_b_by_var"][name][k])
++                        e["spread_a"] = float(r["spread_a_by_var"][name][k])
++                        e["crps_b"]   = float(r["crps_b_by_var"][name][k])
++                        e["crps_a"]   = float(r["crps_a_by_var"][name][k])
++                    long_records.append(e)
+         curves_path = out_dir / "error_curves.csv"
+         pd.DataFrame.from_records(long_records).to_csv(
+             curves_path, index=False, float_format="%.6g",

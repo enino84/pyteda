@@ -43,6 +43,21 @@ def _rmse_relative(xr: np.ndarray, xs: np.ndarray) -> float:
     return float(np.linalg.norm(xs - xr) / np.linalg.norm(xr))
 
 
+def _rmse_relative_by_var(xr: np.ndarray, xs: np.ndarray, var_blocks) -> dict:
+    """Relative RMSE computed independently per variable block.
+
+    Each variable is normalized by the norm of its OWN truth block, so a
+    large-magnitude field (e.g. geopotential height) no longer dominates a
+    small-magnitude one (e.g. velocity). For a single-block model this
+    returns exactly one entry equal to the global ``_rmse_relative``.
+    """
+    out = {}
+    for name, sl in var_blocks.items():
+        denom = np.linalg.norm(xr[sl])
+        out[name] = float(np.linalg.norm(xs[sl] - xr[sl]) / denom) if denom > 0 else float("nan")
+    return out
+
+
 def _ensemble_spread(X: np.ndarray) -> float:
     """RMS of the per-component ensemble standard deviation.
 
@@ -53,6 +68,22 @@ def _ensemble_spread(X: np.ndarray) -> float:
     # implicitly assume when using N-1 in covariance estimation).
     sigma = np.std(X, axis=1, ddof=1)
     return float(np.sqrt(np.mean(sigma ** 2)))
+
+
+def _ensemble_spread_by_var(X: np.ndarray, x_true: np.ndarray, var_blocks) -> dict:
+    """Relative ensemble spread per variable block.
+
+    Returns ``||sigma[block]|| / ||x_true[block]||`` so it shares the same
+    normalization as ``_rmse_relative_by_var``. With that, the per-variable
+    spread/error ratio = spread/rmse is unit-invariant and ≈ 1 when the
+    block is well calibrated, regardless of the field's physical units.
+    """
+    sigma = np.std(X, axis=1, ddof=1)
+    out = {}
+    for name, sl in var_blocks.items():
+        denom = np.linalg.norm(x_true[sl])
+        out[name] = float(np.linalg.norm(sigma[sl]) / denom) if denom > 0 else float("nan")
+    return out
 
 
 def _ensemble_crps(X: np.ndarray, x_true: np.ndarray) -> float:
@@ -80,6 +111,20 @@ def _ensemble_crps(X: np.ndarray, x_true: np.ndarray) -> float:
     return float(np.mean(crps_per_component))
 
 
+def _ensemble_crps_by_var(X: np.ndarray, x_true: np.ndarray, var_blocks) -> dict:
+    """CRPS per variable block, normalized by the block's RMS magnitude.
+
+    Dividing the mean CRPS of a block by ``RMS(x_true[block])`` puts every
+    field on a common, unit-free scale so they can be compared and averaged.
+    """
+    out = {}
+    for name, sl in var_blocks.items():
+        c = _ensemble_crps(X[sl], x_true[sl])
+        scale = float(np.sqrt(np.mean(x_true[sl] ** 2)))
+        out[name] = float(c / scale) if scale > 0 else float("nan")
+    return out
+
+
 def _rank_counts(X: np.ndarray, x_true: np.ndarray, n_bins: int) -> np.ndarray:
     """Per-component rank of truth among ensemble members, accumulated as histogram.
 
@@ -102,6 +147,17 @@ def _rank_counts(X: np.ndarray, x_true: np.ndarray, n_bins: int) -> np.ndarray:
     # Truncate (in case ties pushed past last bin) — np.bincount may produce
     # length > n_bins if integers exceeded N; clamp.
     return counts[:n_bins]
+
+
+def _rank_counts_by_var(X: np.ndarray, x_true: np.ndarray, n_bins: int, var_blocks) -> dict:
+    """One rank histogram per variable block.
+
+    Pooling ranks across fields of different magnitude (as the global
+    version does) corrupts the histogram. Restricting to a block keeps each
+    field's calibration interpretable on its own.
+    """
+    return {name: _rank_counts(X[sl], x_true[sl], n_bins)
+            for name, sl in var_blocks.items()}
 
 
 def _resolve_snapshot_steps(
@@ -338,6 +394,13 @@ class Simulation:
         self.error_b = np.empty(K)
         self.error_a = np.empty(K)
 
+        # Per-variable metric containers. var_blocks is {name: slice}; for a
+        # single-variable model this is one block and mirrors the global value.
+        vb = self.model.var_blocks
+        self.var_names = list(vb.keys())
+        self.error_b_by_var = {name: np.empty(K) for name in vb}
+        self.error_a_by_var = {name: np.empty(K) for name in vb}
+
         if self.store_diagnostics:
             # Per-step, per-component spread (root mean of variance over members).
             self.spread_b = np.empty(K)
@@ -349,6 +412,13 @@ class Simulation:
             # Range is 0..N (inclusive on both sides).
             self.rank_counts_b = np.zeros(N + 1, dtype=np.int64)
             self.rank_counts_a = np.zeros(N + 1, dtype=np.int64)
+            # Per-variable diagnostics.
+            self.spread_b_by_var = {name: np.empty(K) for name in vb}
+            self.spread_a_by_var = {name: np.empty(K) for name in vb}
+            self.crps_b_by_var = {name: np.empty(K) for name in vb}
+            self.crps_a_by_var = {name: np.empty(K) for name in vb}
+            self.rank_counts_b_by_var = {name: np.zeros(N + 1, dtype=np.int64) for name in vb}
+            self.rank_counts_a_by_var = {name: np.zeros(N + 1, dtype=np.int64) for name in vb}
 
         # Snapshot machinery: pre-allocate stacked arrays once we know which
         # steps will be captured.
@@ -380,6 +450,9 @@ class Simulation:
             # Background mean and ensemble before assimilation
             xbk = bg.get_background_state()
             self.error_b[k] = _rmse_relative(x_true, xbk)
+            _eb = _rmse_relative_by_var(x_true, xbk, vb)
+            for name in vb:
+                self.error_b_by_var[name][k] = _eb[name]
 
             # We may need the full background ensemble for diagnostics, for
             # snapshots, or for both — fetch it at most once per step.
@@ -391,6 +464,13 @@ class Simulation:
                     self.spread_b[k] = _ensemble_spread(Xb)
                     self.crps_b[k] = _ensemble_crps(Xb, x_true)
                     self.rank_counts_b += _rank_counts(Xb, x_true, n_bins=N + 1)
+                    _sb = _ensemble_spread_by_var(Xb, x_true, vb)
+                    _cb = _ensemble_crps_by_var(Xb, x_true, vb)
+                    _rb = _rank_counts_by_var(Xb, x_true, N + 1, vb)
+                    for name in vb:
+                        self.spread_b_by_var[name][k] = _sb[name]
+                        self.crps_b_by_var[name][k] = _cb[name]
+                        self.rank_counts_b_by_var[name] += _rb[name]
                 if k in self._snap_index:
                     self.Xb_snapshots[self._snap_index[k]] = Xb
 
@@ -417,6 +497,9 @@ class Simulation:
 
             xak = self.analysis.get_analysis_state()
             self.error_a[k] = _rmse_relative(x_true, xak)
+            _ea = _rmse_relative_by_var(x_true, xak, vb)
+            for name in vb:
+                self.error_a_by_var[name][k] = _ea[name]
 
             need_Xa = self.store_diagnostics or (k in self._snap_index)
             if need_Xa:
@@ -425,6 +508,13 @@ class Simulation:
                     self.spread_a[k] = _ensemble_spread(Xa)
                     self.crps_a[k] = _ensemble_crps(Xa, x_true)
                     self.rank_counts_a += _rank_counts(Xa, x_true, n_bins=N + 1)
+                    _sa = _ensemble_spread_by_var(Xa, x_true, vb)
+                    _ca = _ensemble_crps_by_var(Xa, x_true, vb)
+                    _ra = _rank_counts_by_var(Xa, x_true, N + 1, vb)
+                    for name in vb:
+                        self.spread_a_by_var[name][k] = _sa[name]
+                        self.crps_a_by_var[name][k] = _ca[name]
+                        self.rank_counts_a_by_var[name] += _ra[name]
                 if k in self._snap_index:
                     self.Xa_snapshots[self._snap_index[k]] = Xa
 
