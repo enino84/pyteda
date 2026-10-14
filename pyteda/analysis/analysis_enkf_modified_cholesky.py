@@ -5,6 +5,7 @@ from sklearn.linear_model import Ridge
 
 from .analysis_core import Analysis
 from .registry import register_analysis
+from ._loc_utils import call_pre
 
 @register_analysis("enkf-modified-cholesky")
 class AnalysisEnKFModifiedCholesky(Analysis):
@@ -23,7 +24,8 @@ class AnalysisEnKFModifiedCholesky(Analysis):
         inflate_ensemble(inflation_factor): Computes new ensemble Xa given the inflation factor
     """
 
-    def __init__(self, model, r=1, alpha: float = 0.01, **kwargs):
+    def __init__(self, model, r=1, alpha: float = 0.01, cross=False,
+                 **kwargs):
         """
         Initialize an instance of AnalysisEnKFModifiedCholesky.
 
@@ -34,10 +36,20 @@ class AnalysisEnKFModifiedCholesky(Analysis):
                 ndarray dispatch as LETKF/LEnKF.
             alpha (float, optional): Ridge regression regularisation passed to
                 ``sklearn.linear_model.Ridge``. Default 0.01.
+            cross (bool, optional): Whether the predecessor set of a state
+                component may contain components of other variable blocks
+                (default False). With ``cross=False`` the Cholesky factor, and
+                therefore ``B^{-1}``, is block diagonal by variable and the
+                analysis is univariate: observing one variable leaves the
+                others at their forecast value. With ``cross=True`` the
+                regressions see the other blocks, so observations of one
+                variable update the others. No effect on single-variable
+                models. See :mod:`pyteda.analysis._loc_utils`.
         """
         self.model = model
         self.r = r
         self.alpha = float(alpha)
+        self.cross = bool(cross)
 
     def get_precision_matrix(self, DX, regularization_factor=None):
         """
@@ -84,7 +96,7 @@ class AnalysisEnKFModifiedCholesky(Analysis):
             D_diag[0] = 1.0 / np.var(DX[0, :])
 
         for i in range(1, n):
-            ind_prede = self.model.get_pre(i, self.r)
+            ind_prede = call_pre(self.model, i, self.r, cross=self.cross)
             y = DX[i, :]
             if len(ind_prede) == 0:
                 # No predecessors: residual is the deviation itself.

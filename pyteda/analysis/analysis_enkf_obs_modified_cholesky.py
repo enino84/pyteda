@@ -32,6 +32,7 @@ from sklearn.linear_model import Ridge
 
 from .analysis_core import Analysis
 from .registry import register_analysis
+from ._loc_utils import call_pre
 
 
 @register_analysis("enkf-obs-modified-cholesky")
@@ -66,7 +67,7 @@ class AnalysisEnKFObsModifiedCholesky(Analysis):
                  b_via_cholesky: bool = False, r_state=None,
                  cholesky_method: str = "ridge", cholesky_tol: float = 0.1,
                  alpha_state=None, cholesky_method_state=None,
-                 cholesky_tol_state=None,
+                 cholesky_tol_state=None, cross=False,
                  **kwargs):
         """
         Initialize an instance of AnalysisEnKFObsModifiedCholesky.
@@ -82,6 +83,16 @@ class AnalysisEnKFObsModifiedCholesky(Analysis):
             alpha (float, optional): Ridge regularisation (the lambda) used
                 when ``cholesky_method == 'ridge'``, for the OBSERVATION-space
                 S^{-1} regressions. Default 0.01.
+            cross (bool, optional): Whether a state component's predecessor
+                set may contain components of other variable blocks
+                (default False). With ``cross=False`` the state-space
+                precision is block diagonal by variable and the analysis is
+                univariate: observing one variable leaves the others at their
+                forecast value. With ``cross=True`` observations of one
+                variable update the others through the ensemble cross
+                covariances. No effect on single-variable models, and no
+                effect here unless ``b_via_cholesky`` is True.
+                See :mod:`pyteda.analysis._loc_utils`.
             b_via_cholesky (bool, optional): If True, the factor B in the
                 gain K = B H^T S^{-1} is applied NOT through the (dense,
                 rank-N) sample P^b, but by estimating the state-space
@@ -206,7 +217,9 @@ class AnalysisEnKFObsModifiedCholesky(Analysis):
 
         D_diag[0] = 1.0 / max(np.var(DX[0, :]), var_floor)
         for i in range(1, n):
-            ind_prede = np.asarray(self.model.get_pre(i, self.r_state), dtype=int)
+            ind_prede = np.asarray(
+                call_pre(self.model, i, self.r_state, cross=self.cross), dtype=int
+            )
             if ind_prede.size > max_pre:
                 ind_prede = ind_prede[-max_pre:]
             y = DX[i, :]

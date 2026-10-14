@@ -99,7 +99,8 @@ class AnalysisEnKF(Analysis):
 
             # Apply increment: X^a = X^b + P^b · H^T · Z
             #                       = X^b + (1/(N-1)) · ΔX · (ΔX^T H^T Z)
-            self.Xa = Xb + (DX @ (H_dense.T @ Z)) / (ensemble_size - 1)
+            # ΔX^T H^T = (H ΔX)^T = HDX^T, already available.
+            self.Xa = Xb + (DX @ (HDX.T @ Z)) / (ensemble_size - 1)
         else:
             # Original dense path for small problems.
             Pb = background.get_covariance_matrix()

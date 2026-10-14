@@ -1,3 +1,4 @@
+# Core runtime dependencies of pyteda.
 numpy
 scipy
 matplotlib
@@ -6,6 +7,14 @@ pandas
 xarray
 netCDF4
 joblib
+
+# Geophysical models (optional extras; see pyproject.toml).
+#   pip install pyteda[qg]    -> qg-python,  provides QGModel
+#   pip install pyteda[swe]   -> swesphere,  provides SWEModel
+qg-python>=1.1.0
+swesphere>=0.3.0
+
+# Packaging and tests.
 build
 twine
-pyshtools
+pytest

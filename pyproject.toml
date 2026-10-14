@@ -1,7 +1,7 @@
 [project]
 name = "pyteda"
-version = "0.3.0"
-description = "TEDA: Toy models and ensemble-based Data Assimilation methods for education and experimentation"
+version = "0.6.0"
+description = "TEDA: ensemble-based data assimilation methods, with toy and geophysical models through adapters"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
@@ -28,12 +28,17 @@ dependencies = [
   "scikit-learn",
   "pandas",
   "xarray",
-  "netCDF4",
-  "pyshtools"
+  "netCDF4"
 ]
 
 [project.optional-dependencies]
+# Geophysical models. pyteda does not implement them: each is an external
+# package that pyteda adapts to the Model interface.
+qg  = ["qg-python>=1.1.0"]      # QGModel  -> qgpython
+swe = ["swesphere>=0.4.0"]      # SWEModel -> swesphere
 parallel = ["joblib"]
+all = ["qg-python>=1.1.0", "swesphere>=0.4.0", "joblib"]
+test = ["pytest"]
 
 [tool.setuptools.packages.find]
 where = ["."]

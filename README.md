@@ -1,18 +1,13 @@
 # 🧠 TEDA – Toolbox for Ensemble Data Assimilation
 
-> **What's new in v2 (0.3.0)**
-> - **Flexible observation operators** (linear selection, generic linear, nonlinear with Jacobian) and noise models (isotropic, heterogeneous diagonal, dense covariance).
-> - **`Scenario`** object that freezes the entire random twin experiment under a single seed.
-> - **`Benchmark`** runner for `M scenarios × |methods| × K runs` with bit-reproducible results.
-> - **`pyteda.io`** module with **netCDF by default** (npz fallback) for portable storage of initial ensembles, truth trajectories, observations, and full scenarios. Granular helpers let you compute X0 once and reuse it across every scenario.
-> - **New `QGModel`** — 1.5-layer quasi-geostrophic with pluggable time integrators (Euler, RK4, DP5, AB2/3/4, SSPRK3, Leapfrog+RA/RAW), `dirichlet`/`channel` boundary conditions, and a library of initial conditions (zero, fourier, vortex, dipole, rossby_wave, band_noise, restart). Vendored from the qg-integrators SoftwareX package under its original LICENSE.
-> - **New `SWEModel`** — shallow-water equations on the sphere (Driscoll-Healy grid, T-LMAX truncation, vector-invariant form, exponential SH filter + polar sponge, Williamson TC2 + Rossby perturbations). Configurable state vector via `state_vars=['u','v','h']` (or any subset).
-> - **Heterogeneous localization radius** — the `r` parameter of LEnKF/LETKF (and of `model.create_decorrelation_matrix`/`get_ngb`/`get_pre`) now accepts three forms:
->   - `int`/`float`: single radius for all components (legacy).
->   - `dict`: per variable block, e.g. `{'q': 2, 'psi': 4}` for QGModel, `{'u': 4, 'v': 4, 'h': 6}` for SWEModel.
->   - `ndarray`: per state component (length `n`).
-> - **Calibration diagnostics** in `BenchmarkResults`: ensemble spread, spread/error ratio, CRPS (Continuous Ranked Probability Score), and Talagrand rank histograms. Enable with `Benchmark(..., store_diagnostics=True)`.
->
+> **What's new in 0.6.0: the models moved out**
+> - **`QGModel` and `SWEModel` are now adapters, not implementations.** The physics used to be vendored inside pyteda; it now lives in its own published package, and pyteda only maps it onto the `Model` interface. Nothing was lost: the adapters keep the same state vector, variable blocks and localization helpers.
+>   - `QGModel` → [`qg-python`](https://pypi.org/project/qg-python/) &nbsp;·&nbsp; `pip install pyteda[qg]`
+>   - `SWEModel` → [`swesphere`](https://pypi.org/project/swesphere/) &nbsp;·&nbsp; `pip install pyteda[swe]`
+> - **Both are optional extras.** `import pyteda` no longer needs `pyshtools`, and asking for a model you have not installed raises an error that names the command to fix it. `pyteda.models.available_models()` reports what you have.
+> - **The shallow-water physics is corrected.** The vendored copy integrated `dh/dt = -h div(V)`, which omits the advection of `h`; `swesphere` uses the flux form `dh/dt = -div(h V)`. Measured on the unforced regime, the global mass now drifts 5e-5 over two days instead of about 1e-3. **Results produced with the vendored model must be regenerated.** The integrator also changes from explicit Euler to RK4.
+> - **Flow regimes.** `SWEModel(preset=...)` selects one of the three documented `swesphere` regimes (`waves`, `one_jet`, `two_jets`), each with measured statistics. `preset=None` reproduces the old bare setup. `QGModel(preset=...)` likewise exposes `sakov_oke_stationary`, the regime used in assimilation testbeds.
+> - **Two QG options were dropped** because the published `qg-python` does not implement them: the `channel` boundary condition and `raw_beta`. Passing them warns and continues. The scheme list is now `order1, order2, rk4, dp5, leapfrog` and the initial conditions are `zero, fourier, vortex, restart`.
 > See the example notebooks in [`examples/`](examples/) for full walkthroughs of Lorenz96, QGModel, and SWEModel.
 
 We are thrilled to present TEDA, a cutting-edge Python toolbox designed to facilitate the teaching and learning of ensemble-based data assimilation (DA). TEDA caters to the needs of educators and learners alike, offering a comprehensive platform to explore the captivating world of meteorological anomalies, climate change, and DA methodologies.
@@ -43,28 +38,39 @@ Currently, TEDA includes the **Lorenz 96 model** (40 variables), a well-known be
 
 ## 📦 Installation
 
-Aquí tienes una versión mejor redactada y estructurada para la sección de instalación y uso rápido:
-
----
-
-## 🚀 Installation and Quick Start
-
-### ✅ From PyPI
-
-To install the latest stable version:
+### From PyPI
 
 ```bash
-pip install pyteda
+pip install pyteda            # core: filters, Lorenz96, scenarios, benchmarks
+pip install pyteda[qg]        # + QGModel   (quasi-geostrophic, via qg-python)
+pip install pyteda[swe]       # + SWEModel  (shallow water on the sphere, via swesphere)
+pip install pyteda[all]       # everything
 ```
 
-### 🧪 From Source (for development)
+pyteda implements the assimilation methods and the toy model. The two
+geophysical models are separate published packages that pyteda adapts to its
+`Model` interface, so you install only the ones you need:
 
-Clone the repository and install in editable mode:
+| Model | Backend package | Extra |
+|---|---|---|
+| `Lorenz96` | built in | — |
+| `QGModel` | [`qg-python`](https://pypi.org/project/qg-python/) | `pyteda[qg]` |
+| `SWEModel` | [`swesphere`](https://pypi.org/project/swesphere/) | `pyteda[swe]` |
+
+Check what an installation can build:
+
+```python
+from pyteda.models import available_models
+available_models()
+# {'Lorenz96': True, 'QGModel': 'pip install pyteda[qg]', 'SWEModel': True}
+```
+
+### From source (for development)
 
 ```bash
-git clone https://github.com/your-username/pyteda.git
+git clone https://github.com/enino84/pyteda.git
 cd pyteda
-pip install -e .
+pip install -e ".[all,test]"
 ```
 
 ### 🛠️ Recommended Setup: Virtual Environment
@@ -151,6 +157,62 @@ print(results.diagnostics_summary())
 ```
 
 📈 For visualizations and full working examples, see the notebooks in [`examples/`](examples/).
+
+---
+
+## Choosing what to assimilate
+
+Two independent choices, for a model with more than one variable block
+(`SWEModel`: `u`, `v`, `h`; `QGModel`: `q`, `psi`).
+
+**1. Which variables are observed** — the observation operator decides this.
+`pyteda.observation.grid_masks` places a network inside the blocks you name:
+
+```python
+from pyteda.models import SWEModel
+from pyteda.observation.grid_masks import strided_indices, checkerboard_indices
+from pyteda.observation import LinearSelection, IsotropicDiagonal
+
+model = SWEModel(preset='two_jets', LMAX=8)
+
+idx, m = strided_indices(model, spacing=4, variables=['h'])        # h only
+idx, m = checkerboard_indices(model, variables=['u', 'v'])         # wind only
+idx, m = strided_indices(model, spacing=4)                         # everything
+
+op = LinearSelection(m=m, n_state=model.dim, indices=idx)
+noise = IsotropicDiagonal(std=1.0, dim=m)
+```
+
+Keep the full state in the state vector and select with the operator. Do not
+shrink the state itself with `state_vars=['h']`: the model still has to
+integrate the wind, so the fields you drop become a fixed reference rather
+than something the filter can correct.
+
+**2. Whether an observed variable updates the others** — the `cross` flag on
+the localized filters decides this, and the default is *no*:
+
+```python
+# univariate: observing h updates h and leaves u, v at their forecast value
+dict(method='letkf', r=2)                      # cross=False is the default
+
+# multivariate: the observation of h reaches u and v through the ensemble
+# cross covariances
+dict(method='letkf', r=2, cross=True)
+```
+
+`cross=False` localizes each block on its own, so the Cholesky factor and the
+decorrelation matrix come out block diagonal by variable and the increment in
+the unobserved blocks is *exactly* zero. `cross=True` puts the same grid cell
+of the other blocks into each local domain or predecessor set. `enkf-b-loc`
+also takes `cross_scale` to taper the cross-block entries.
+
+The flag is available on `letkf`, `lenkf`, `enkf-b-loc`,
+`enkf-modified-cholesky`, `enkf-shrinkage-precision`,
+`enkf-obs-modified-cholesky` (with `b_via_cholesky=True`), its local variant
+and `enkf-obs-woodbury-cholesky`. The unlocalized filters (`enkf`, `etkf`,
+`ensrf`, `enkf-cholesky`, the Ledoit-Wolf family) use the full sample
+covariance and are always multivariate, so they take no flag. On `Lorenz96`
+the flag is accepted and does nothing: one block, nothing to cross to.
 
 ---
 

@@ -2,12 +2,13 @@ import numpy as np
 
 from .analysis_core import Analysis
 from .registry import register_analysis
+from ._loc_utils import call_ngb
 
 @register_analysis("lenkf")
 class AnalysisLEnKF(Analysis):
     """Analysis LEnKF"""
 
-    def __init__(self, model, r=1, **kwargs):
+    def __init__(self, model, r=1, cross=False, **kwargs):
         """
         Initialize the AnalysisLEnKF object.
 
@@ -22,14 +23,23 @@ class AnalysisLEnKF(Analysis):
                                       for QGModel, or ``{'x': 2}`` for Lorenz96.
               * ``ndarray``         — per state component (length ``n``).
             The model handles the dispatch in ``get_ngb`` / ``get_pre``.
+        cross : bool, optional
+            Whether each local domain reaches across variable blocks
+            (default False, a univariate analysis: observing one variable
+            leaves the others at their forecast value). With ``cross=True``
+            the local domain of a point also contains the same grid cell in
+            the other blocks, so observations of one variable update the
+            others through the ensemble cross covariances. Has no effect on
+            single-variable models. See :mod:`pyteda.analysis._loc_utils`.
         """
         self.model = model
         self.r = r
+        self.cross = bool(cross)
 
 
     def local_analysis_LEnKF(self, Xb, H, R, y, n, N, i, r):
         # Subdomain decomposition
-        si = si = self.model.get_ngb(i, r) #[(i+j) % n for j in range(-r, r+1)]
+        si = call_ngb(self.model, i, r, cross=self.cross)
         center_index = np.where(si == i)[0][0]  # Index of the center element in the subdomain
         Xbi = Xb[:, si]
         Pbi = np.cov(Xbi.T)

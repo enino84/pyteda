@@ -169,20 +169,36 @@ class TestExportCSV:
         assert set(df["method"].unique()) == {"EnKF", "LETKF"}
 
     def test_error_curves_csv_long_format(self, small_scenario, tmp_path):
-        """error_curves.csv is long-format with cells × steps rows."""
+        """error_curves.csv is long-format: one row per cell × step × variable.
+
+        Each step contributes a ``global`` row (whole-state relative RMSE)
+        plus one row per state-variable block, so a model with ``v`` blocks
+        gives ``1 + v`` rows per step. Lorenz96 has a single block, ``x``.
+        """
         import pandas as pd
+        n_runs = 2
         results = Benchmark(
             scenarios=[small_scenario],
             methods={"LETKF": dict(method="letkf", r=2)},
-            n_runs_per_method=2, parallel=False, verbose=False,
+            n_runs_per_method=n_runs, parallel=False, verbose=False,
         ).run()
         results.export_csv(tmp_path)
         df = pd.read_csv(tmp_path / "error_curves.csv")
-        # 1 scenario × 1 method × 2 runs × n_steps
-        assert len(df) == 2 * small_scenario.n_steps
-        for col in ["method", "scenario_id", "run_id", "step",
-                    "time", "error_b", "error_a"]:
+
+        for col in ["method", "scenario_id", "run_id", "step", "time",
+                    "variable", "error_b", "error_a"]:
             assert col in df.columns
+
+        n_blocks = len(small_scenario.model.var_blocks)
+        # 1 scenario × 1 method × n_runs × n_steps × (global + one per block)
+        assert len(df) == n_runs * small_scenario.n_steps * (1 + n_blocks)
+
+        assert "global" in set(df["variable"])
+        assert set(small_scenario.model.var_blocks) <= set(df["variable"])
+        # The global series alone is one row per step and run.
+        assert len(df[df["variable"] == "global"]) == (
+            n_runs * small_scenario.n_steps
+        )
 
     def test_diagnostics_columns_present_when_enabled(
         self, small_scenario, tmp_path

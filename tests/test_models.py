@@ -9,15 +9,28 @@ Each model must satisfy the Model contract:
     - create_decorrelation_matrix(r), get_decorrelation_matrix() -> (n, n)
 """
 
+import importlib.util
 import warnings
 
 import numpy as np
 import pytest
 
-from pyteda.models import Lorenz96, QGModel, SWEModel
+from pyteda.models import Lorenz96, available_models
 
 
 warnings.filterwarnings("ignore", category=Warning)
+
+# The geophysical models live in external packages and are optional extras.
+# Skip their tests when the extra is not installed rather than failing.
+has_qg = importlib.util.find_spec("qgpython") is not None
+has_swe = importlib.util.find_spec("swesphere") is not None
+
+needs_qg = pytest.mark.skipif(
+    not has_qg, reason="QGModel needs qg-python: pip install pyteda[qg]"
+)
+needs_swe = pytest.mark.skipif(
+    not has_swe, reason="SWEModel needs swesphere: pip install pyteda[swe]"
+)
 
 
 # ----------------------------------------------------------------------
@@ -93,10 +106,13 @@ class TestLorenz96:
 # ----------------------------------------------------------------------
 # QGModel
 # ----------------------------------------------------------------------
+@needs_qg
 class TestQGModel:
     @pytest.fixture(scope="class")
     def qg(self):
         # mrefin=4 -> grid 25x25 = 625 per field, dim 1250
+        from pyteda.models import QGModel
+
         return QGModel(mrefin=4, scheme="rk4", dt=1.0, ic_kind="fourier",
                        verbose=False)
 
@@ -111,15 +127,23 @@ class TestQGModel:
         assert q_size + psi_size == qg.dim
 
     def test_lists_integrators(self):
+        from pyteda.models import QGModel
+
         ints = QGModel.list_available_integrators()
-        # Should at least include the standard ones
-        for name in ("rk4", "euler", "ab2", "ssprk3"):
+        # The schemes the qg-python backend provides.
+        for name in ("rk4", "dp5", "leapfrog"):
             assert name in ints
 
     def test_lists_ics(self):
+        from pyteda.models import QGModel
+
         ics = QGModel.list_available_ics()
         for name in ("zero", "fourier", "vortex"):
             assert name in ics
+
+    def test_backend_is_external(self, qg):
+        # The physics must come from qg-python, not from pyteda.
+        assert type(qg._core).__module__.startswith("qgpython")
 
     def test_propagate(self, qg):
         x = qg.get_initial_condition(seed=0)
@@ -143,11 +167,16 @@ class TestQGModel:
 # ----------------------------------------------------------------------
 # SWEModel
 # ----------------------------------------------------------------------
+@needs_swe
 class TestSWEModel:
     @pytest.fixture(scope="class")
     def swe(self):
-        # Small grid for fast tests
-        return SWEModel(LMAX=4, dt=120.0, state_vars=["u", "v", "h"])
+        # Small grid for fast tests; the bare unforced model keeps the
+        # Williamson TC2 base flow the diagnostics below check.
+        from pyteda.models import SWEModel
+
+        return SWEModel(preset=None, LMAX=4, dt=120.0,
+                        state_vars=["u", "v", "h"])
 
     def test_dimension(self, swe):
         # LMAX=4 -> Nlat=10, Nlon=20, field=200, dim=600
@@ -158,19 +187,29 @@ class TestSWEModel:
         assert list(swe.var_blocks.keys()) == ["u", "v", "h"]
 
     def test_state_vars_subset(self):
-        m = SWEModel(LMAX=4, state_vars=["h"])
+        from pyteda.models import SWEModel
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            m = SWEModel(preset=None, LMAX=4, state_vars=["h"])
         assert m.get_number_of_variables() == m.field_size
         assert list(m.var_blocks.keys()) == ["h"]
 
     def test_state_vars_validation(self):
+        from pyteda.models import SWEModel
+
         with pytest.raises(ValueError, match="Unknown"):
-            SWEModel(LMAX=4, state_vars=["foo"])
+            SWEModel(preset=None, LMAX=4, state_vars=["foo"])
         with pytest.raises(ValueError, match="duplicates"):
-            SWEModel(LMAX=4, state_vars=["u", "u"])
+            SWEModel(preset=None, LMAX=4, state_vars=["u", "u"])
 
     def test_state_vars_canonical_order(self):
         # Even if the user passes them out of order, they're stored canonically
-        m = SWEModel(LMAX=4, state_vars=["h", "u"])
+        from pyteda.models import SWEModel
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            m = SWEModel(preset=None, LMAX=4, state_vars=["h", "u"])
         assert m.state_vars == ["u", "h"]
 
     def test_propagate(self, swe):
@@ -193,3 +232,91 @@ class TestSWEModel:
         assert h.mean() > 1000
         # u_max from Williamson TC2 base flow ~ U0 = 38 m/s
         assert u.max() < 50
+
+
+# ----------------------------------------------------------------------
+# Optional-model plumbing
+# ----------------------------------------------------------------------
+class TestOptionalModels:
+    def test_import_pyteda_without_extras(self):
+        """Importing pyteda must not require the geophysical packages."""
+        import pyteda  # noqa: F401
+        from pyteda.models import Lorenz96  # noqa: F811
+
+        assert Lorenz96(n=20).get_number_of_variables() == 20
+
+    def test_available_models_reports_state(self):
+        avail = available_models()
+        assert avail["Lorenz96"] is True
+        for name, extra in (("QGModel", "qg"), ("SWEModel", "swe")):
+            if avail[name] is not True:
+                # Not installed: the value must tell the user how to fix it.
+                assert f"pyteda[{extra}]" in avail[name]
+
+    def test_unknown_attribute_raises(self):
+        import pyteda.models as M
+
+        with pytest.raises(AttributeError):
+            M.NotAModel
+
+    @needs_swe
+    def test_swe_backend_is_external(self):
+        """The shallow-water physics must come from swesphere."""
+        from pyteda.models import SWEModel
+
+        m = SWEModel(preset=None, LMAX=4)
+        assert type(m._core).__module__.startswith("swesphere")
+
+    @needs_swe
+    def test_swe_presets(self):
+        from pyteda.models import SWEModel
+
+        for preset in ("waves", "one_jet", "two_jets"):
+            m = SWEModel(preset=preset, LMAX=4)
+            x = m.get_initial_condition()
+            assert np.isfinite(x).all()
+        with pytest.raises(ValueError, match="Unknown preset"):
+            SWEModel(preset="nope", LMAX=4)
+
+    @needs_swe
+    def test_swe_seeded_members_differ_and_are_reproducible(self):
+        from pyteda.models import SWEModel
+
+        m = SWEModel(preset="two_jets", LMAX=4)
+        x0 = m.get_initial_condition(seed=0)
+        a = m.get_initial_condition(seed=1)
+        b = m.get_initial_condition(seed=2)
+        assert not np.allclose(a, x0)
+        assert not np.allclose(a, b)
+        assert np.allclose(a, m.get_initial_condition(seed=1))
+
+    @needs_swe
+    def test_swe_subset_is_member_independent(self):
+        """A subset state must not leak hidden fields between members.
+
+        Ensemble members are propagated one after another on the same model
+        object, so a forecast must never depend on which member was
+        propagated before it.
+        """
+        from pyteda.models import SWEModel
+
+        def two_forecasts(order):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                m = SWEModel(preset="two_jets", LMAX=4, state_vars=["h"])
+            m.get_initial_condition(seed=order[0])
+            members = {s: m.get_initial_condition(seed=s) for s in (1, 2)}
+            return {s: m.propagate(members[s].copy(), [0.0, 240.0])
+                    for s in order}
+
+        fwd = two_forecasts((1, 2))
+        rev = two_forecasts((2, 1))
+        for s in (1, 2):
+            assert np.allclose(fwd[s], rev[s])
+
+    @needs_swe
+    def test_swe_subset_warns(self):
+        from pyteda.models import SWEModel
+
+        with pytest.warns(UserWarning, match="not estimated"):
+            SWEModel(preset=None, LMAX=4, state_vars=["h"])

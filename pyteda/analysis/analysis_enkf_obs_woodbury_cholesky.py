@@ -49,6 +49,7 @@ from sklearn.linear_model import Ridge
 
 from .analysis_core import Analysis
 from .registry import register_analysis
+from ._loc_utils import call_pre
 
 
 @register_analysis("enkf-obs-woodbury-cholesky")
@@ -76,7 +77,7 @@ class AnalysisEnKFObsWoodburyCholesky(Analysis):
 
     def __init__(self, model=None, r=1, alpha: float = 0.01,
                  cholesky_method: str = "ridge", cholesky_tol: float = 0.1,
-                 use_woodbury: bool = False, **kwargs):
+                 use_woodbury: bool = False, cross=False, **kwargs):
         """
         Parameters
         ----------
@@ -90,6 +91,15 @@ class AnalysisEnKFObsWoodburyCholesky(Analysis):
             Per-row conditional-regression solver for B^{-1}.
         cholesky_tol : float
             Relative singular-value cutoff for the 'svd' solver.
+        cross : bool
+            Whether a state component's predecessor set may contain
+            components of other variable blocks. With the default False the
+            state-space precision B^-1 is block diagonal by variable and the
+            analysis is univariate: observing one variable leaves the others
+            at their forecast value. With cross=True observations of one
+            variable update the others through the ensemble cross
+            covariances. No effect on single-variable models.
+            See :mod:`pyteda.analysis._loc_utils`.
         use_woodbury : bool
             If True, compute the analysis through the explicit Woodbury
             action of S^{-1} in observation space (cheaper when m << n).
@@ -97,6 +107,7 @@ class AnalysisEnKFObsWoodburyCholesky(Analysis):
             solve  A z = H^T R^{-1} D  (cheaper when m >~ n).
         """
         self.model = model
+        self.cross = bool(cross)
         self.r = r
         self.alpha = float(alpha)
         if cholesky_method not in ("ridge", "svd"):
@@ -148,7 +159,9 @@ class AnalysisEnKFObsWoodburyCholesky(Analysis):
 
         D_diag[0] = 1.0 / max(np.var(DX[0, :]), var_floor)
         for i in range(1, n):
-            ind = np.asarray(self.model.get_pre(i, self.r), dtype=int)
+            ind = np.asarray(
+                call_pre(self.model, i, self.r, cross=self.cross), dtype=int
+            )
             if ind.size > max_pre:
                 ind = ind[-max_pre:]
             y = DX[i, :]

@@ -54,6 +54,7 @@ from sklearn.linear_model import Ridge
 
 from .analysis_core import Analysis
 from .registry import register_analysis
+from ._loc_utils import call_ngb
 
 
 @register_analysis("enkf-obs-modified-cholesky-local")
@@ -72,6 +73,12 @@ class AnalysisEnKFObsModifiedCholeskyLocal(Analysis):
             domain of state component ``i``) and ``get_number_of_variables``.
         r (int, dict, or ndarray): Localisation radius. Same int/dict/ndarray
             dispatch as the LETKF (the model resolves it in ``get_ngb``).
+        cross (bool, optional): Whether each local domain reaches across
+            variable blocks (default False, a univariate analysis: observing
+            one variable leaves the others at their forecast value). With
+            ``cross=True`` observations of one variable update the others
+            through the ensemble cross covariances. No effect on
+            single-variable models. See :mod:`pyteda.analysis._loc_utils`.
         alpha (float): Ridge regularisation for the local conditional
             regressions. Default 0.01.
         cholesky_method (str): 'ridge' (penalty ``alpha``) or 'svd'
@@ -85,9 +92,10 @@ class AnalysisEnKFObsModifiedCholeskyLocal(Analysis):
 
     def __init__(self, model=None, r=1, alpha: float = 0.01,
                  cholesky_method: str = "ridge", cholesky_tol: float = 0.1,
-                 ddof_correction: bool = True, **kwargs):
+                 ddof_correction: bool = True, cross=False, **kwargs):
         self.model = model
         self.r = r
+        self.cross = bool(cross)
         self.alpha = float(alpha)
         if cholesky_method not in ("ridge", "svd"):
             raise ValueError(
@@ -175,7 +183,9 @@ class AnalysisEnKFObsModifiedCholeskyLocal(Analysis):
         """
         n = Xb.shape[0]
         # Local state domain and centre.
-        si = np.atleast_1d(self.model.get_ngb(i, self.r)).astype(int)
+        si = np.atleast_1d(
+            call_ngb(self.model, i, self.r, cross=self.cross)
+        ).astype(int)
         center_pos = int(np.where(si == i)[0][0])
 
         Xbi = Xb[si, :]                                   # (n_local, N)

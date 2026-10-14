@@ -1,16 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Shallow-water equations on the sphere — TEDA model package.
+"""Shallow-water equations on the sphere — TEDA adapter.
 
-Public API:
+The model is the external ``swesphere`` package (``pip install pyteda[swe]``);
+this subpackage only adapts it to the TEDA ``Model`` interface.
 
     from pyteda.models import SWEModel
-
-Components (also available individually):
-
-    pyteda.models.swe._grid                 — Driscoll-Healy grid + operators
-    pyteda.models.swe._dynamics             — vector-invariant SWE rhs
-    pyteda.models.swe._initial_conditions   — Williamson TC2 + Rossby perturbations
-    pyteda.models.swe.swe_model             — TEDA-facing SWEModel class
 """
 
 from .swe_model import SWEModel

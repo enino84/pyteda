@@ -71,6 +71,8 @@ class Lorenz96(Model):
     def create_decorrelation_matrix(
         self,
         r: RadiusSpec,
+        cross: bool = False,
+        cross_scale: float = 1.0,
         combine: str = "mean",
     ) -> None:
         """Build the decorrelation matrix L using the chosen ``r`` spec.
@@ -78,6 +80,11 @@ class Lorenz96(Model):
         Distance is taken modulo ``n`` (cyclic boundary). The kernel is
         gaussian: ``L[i, j] = exp(-d_ij^2 / (2 * r_ij^2))`` where
         ``r_ij`` combines ``r_i`` and ``r_j`` per ``combine``.
+
+        ``cross`` and ``cross_scale`` are accepted so that the localized
+        filters can pass them to every model without asking what the model
+        is. They have no effect here: Lorenz96 is a single-variable model,
+        so there is no second block to link to.
         """
         r_arr = self._resolve(r)
         n = self.n
@@ -99,13 +106,21 @@ class Lorenz96(Model):
             )
         return self._L
 
-    def get_ngb(self, i: int, r: RadiusSpec) -> np.ndarray:
-        """Return cyclic neighbours of ``i`` within radius ``r_i``."""
+    def get_ngb(
+        self, i: int, r: RadiusSpec, cross: bool = False
+    ) -> np.ndarray:
+        """Return cyclic neighbours of ``i`` within radius ``r_i``.
+
+        ``cross`` is accepted for interface compatibility and ignored: this
+        model has one variable block, so there is no other block to include.
+        """
         r_arr = self._resolve(r)
         ri = int(round(r_arr[i]))
         return np.arange(i - ri, i + ri + 1) % self.n
 
-    def get_pre(self, i: int, r: RadiusSpec) -> np.ndarray:
+    def get_pre(
+        self, i: int, r: RadiusSpec, cross: bool = False
+    ) -> np.ndarray:
         """Return neighbours of ``i`` with index < i (used by Cholesky-style filters)."""
-        ngb = self.get_ngb(i, r)
+        ngb = self.get_ngb(i, r, cross=cross)
         return ngb[ngb < i]

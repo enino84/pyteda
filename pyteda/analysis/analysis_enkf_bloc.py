@@ -2,12 +2,13 @@ import numpy as np
 
 from .analysis_core import Analysis
 from .registry import register_analysis
+from ._loc_utils import build_decorrelation
 
 @register_analysis("enkf-b-loc")
 class AnalysisEnKFBLoc(Analysis):
     """Analysis EnKF B-Loc"""
 
-    def __init__(self, model, r=1, **kwargs):
+    def __init__(self, model, r=1, cross=False, cross_scale=1.0, **kwargs):
         """
         Initialize the AnalysisEnKFBLoc object.
 
@@ -17,9 +18,24 @@ class AnalysisEnKFBLoc(Analysis):
             An object that has all the methods and attributes of the given model.
         r : int, optional
             Value used in the process of removing correlations (default is 1).
+        cross : bool, optional
+            Whether the decorrelation matrix keeps entries that link different
+            variable blocks (default False, which zeroes them and makes the
+            analysis univariate: observing one variable leaves the others at
+            their forecast value). With ``cross=True`` an observation of one
+            variable updates the others through the ensemble cross
+            covariances. Has no effect on single-variable models.
+        cross_scale : float, optional
+            Taper applied to the cross-block entries when ``cross=True``
+            (default 1.0, trusting them as much as the within-block ones).
+            See :mod:`pyteda.analysis._loc_utils`.
         """
         self.model = model
-        self.model.create_decorrelation_matrix(r)
+        self.r = r
+        self.cross = bool(cross)
+        self.cross_scale = float(cross_scale)
+        build_decorrelation(model, r, cross=self.cross,
+                            cross_scale=self.cross_scale)
 
     def perform_assimilation(self, background, observation):
         """

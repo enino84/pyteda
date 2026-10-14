@@ -46,6 +46,7 @@ from sklearn.linear_model import Ridge
 
 from .analysis_core import Analysis
 from .registry import register_analysis
+from ._loc_utils import call_pre
 
 
 # Valid criterion names exposed by the filter.
@@ -91,6 +92,15 @@ class AnalysisEnKFShrinkageBinv(Analysis):
         One of ``"mse"``, ``"stein"``, ``"da"``.
     regularization_factor : float, optional (default 0.01)
         Ridge regularisation in the modified Cholesky fits.
+    cross : bool, optional (default False)
+        Whether the modified-Cholesky predecessor set of a state component
+        may contain components of other variable blocks. With the default
+        ``False`` the precision estimate is block diagonal by variable and
+        the analysis is univariate: observing one variable leaves the others
+        at their forecast value. With ``cross=True`` observations of one
+        variable update the others through the ensemble cross covariances.
+        No effect on single-variable models.
+        See :mod:`pyteda.analysis._loc_utils`.
     rtol_pseudo_inverse : float, optional (default 0.25)
         Relative tolerance for truncating singular values when building
         W (Stein/DA only). Singular values with σ_e/σ_1 ≤ rtol are
@@ -103,9 +113,11 @@ class AnalysisEnKFShrinkageBinv(Analysis):
                  rtol_pseudo_inverse=0.25,
                  cholesky_method="ridge",
                  cholesky_tol=0.1,
+                 cross=False,
                  **kwargs):
         self.model = model
         self.r = r
+        self.cross = bool(cross)
         self.r_wide = r_wide
         if criterion not in VALID_CRITERIA:
             raise ValueError(
@@ -209,7 +221,7 @@ class AnalysisEnKFShrinkageBinv(Analysis):
             D[0, 0] = 1.0 / max(np.var(DX[0, :]), VAR_FLOOR)
 
         for i in range(1, n):
-            ind_prede = self.model.get_pre(i, r)
+            ind_prede = call_pre(self.model, i, r, cross=self.cross)
             y = DX[i, :]
             if len(ind_prede) == 0:
                 if sparse_path:

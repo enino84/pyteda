@@ -860,7 +860,10 @@ def main():
     print(" SWE setup")
     print("=" * 72)
     print(f"  LMAX = {LMAX}  ·  state_vars = {STATE_VARS}  ·  dt = {DT:.0f}s")
-    model = SWEModel(LMAX=LMAX, dt=DT, state_vars=STATE_VARS)
+    # preset=None keeps the historical setup of this example: the bare
+    # unforced model from the Williamson TC2 + Rossby initial condition.
+    # Use preset="two_jets" for the stationary turbulent regime.
+    model = SWEModel(preset=None, LMAX=LMAX, dt=DT, state_vars=STATE_VARS)
     print(f"  grid: {model.grid.Nlat} × {model.grid.Nlon}  "
           f"·  field_size = {model.field_size}  "
           f"·  state dim = {model.dim}")
