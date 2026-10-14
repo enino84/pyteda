@@ -1,0 +1,44 @@
+# Publishes to PyPI when a GitHub release is created.
+# Uses PyPI "trusted publishing": no API token is stored in the repository.
+# One-time setup on pypi.org: Your projects -> pyteda -> Publishing -> add a
+# GitHub publisher with
+#   owner: enino84   repository: pyteda   workflow: publish.yml   environment: pypi
+name: publish
+on:
+  release:
+    types: [published]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install ".[all]" pytest
+      - run: python -m pytest tests -q
+
+  build-and-publish:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install build
+      - run: python -m build
+      - name: the vendored physics must not be back in the wheel
+        run: |
+          python -c "
+          import glob, zipfile
+          whl = glob.glob('dist/*.whl')[0]
+          bad = [n for n in zipfile.ZipFile(whl).namelist()
+                 if '/models/qg/' in n or n.endswith(('_dynamics.py', '_grid.py',
+                                                      '_initial_conditions.py'))]
+          assert not bad, 'vendored model physics in the wheel: ' + repr(bad)
+          print('wheel is clean:', whl)
+          "
+      - uses: pypa/gh-action-pypi-publish@release/v1

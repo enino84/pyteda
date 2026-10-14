@@ -91,6 +91,16 @@ boundary conditions, integrator registry and IC library) and
   installing 0.4.0 is the whole fix. Any cycled SWE result produced with
   swesphere 0.3.0 should be regenerated.
 
+- Continuous integration, which this repository had none of. `tests.yml` runs
+  the suite on every push and pull request in two shapes: a core install with
+  no extras, where the QG and SWE tests must skip rather than fail, which is
+  what keeps the lazy imports honest; and an install with both extras, which
+  doubles as the integration test of the two adapters against the published
+  `qg-python` and `swesphere`. `publish.yml` builds and uploads to PyPI on a
+  GitHub release through trusted publishing, so no token is stored in the
+  repository, and it refuses to publish a wheel that contains the vendored
+  physics again.
+
 ### Added
 
 - `SWEModel(preset=...)`: the three characterized `swesphere` regimes,
