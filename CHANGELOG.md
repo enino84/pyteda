@@ -7,7 +7,7 @@
 > 0.5.0 would be refused by PyPI and would never be picked up by
 > `pip install -U pyteda`.
 
-## Unreleased
+## 0.6.1 (2026-11-06)
 
 ### Correctness
 
