@@ -56,6 +56,10 @@ class AnalysisEnSRF(Analysis):
 
         I = np.eye(N)
         d = y - H @ xb
+        # Deviations scaled so that P^b = DX DX^T, i.e. divided by sqrt(N - 1).
+        # With raw deviations the filter assimilates with a background
+        # covariance N - 1 times too large.
+        DX = DX / np.sqrt(N - 1)
         V = H @ DX
         IN = R + V @ V.T
         dxa = DX @ V.T @ np.linalg.solve(IN, d)
@@ -68,7 +72,7 @@ class AnalysisEnSRF(Analysis):
         Pat_sqrt = U @ np.diag(np.sqrt(S)) @ U.T
 
         self.xa = xa
-        self.Xa = xa.reshape(-1, 1) + DX @ Pat_sqrt
+        self.Xa = xa.reshape(-1, 1) + np.sqrt(N - 1) * (DX @ Pat_sqrt)
 
         return self.Xa
   

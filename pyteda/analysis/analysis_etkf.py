@@ -60,13 +60,18 @@ class AnalysisETKF(Analysis):
 
         projection_onto_ensemble_space = Q.T @ np.linalg.solve(R, Q)
         U, S, _ = np.linalg.svd(projection_onto_ensemble_space)
-        Pa_ens_inv = U @ np.diag(1 / (S + 1)) @ U.T
+        # DX holds raw deviations, so P^b = DX DX^T / (N - 1) and the analysis
+        # covariance in ensemble space is [(N - 1) I + Q^T R^-1 Q]^-1
+        # (Hunt et al., 2007, eqs. 21 and 24). Writing "+ 1" here instead of
+        # "+ (N - 1)" assimilates with a background covariance N - 1 times
+        # too large.
+        Pa_ens_inv = U @ np.diag(1 / (S + (N - 1))) @ U.T
 
         rhs = Q.T @ np.linalg.solve(R, d)
         dxa = DX @ Pa_ens_inv @ rhs
         xa = xb + dxa
 
-        Pat_sqrt = U @ np.diag(np.sqrt(1 / (S + 1))) @ U.T
+        Pat_sqrt = U @ np.diag(np.sqrt((N - 1) / (S + (N - 1)))) @ U.T
 
         """
         Pat = I - V.T @ np.linalg.solve(IN, V)

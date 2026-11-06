@@ -7,6 +7,29 @@
 > 0.5.0 would be refused by PyPI and would never be picked up by
 > `pip install -U pyteda`.
 
+## Unreleased
+
+### Correctness
+
+- **ETKF, LETKF and EnSRF assimilated with a background covariance `N - 1`
+  times too large.** The three filters work in ensemble space with the raw
+  deviations `DX = Xb - mean`, for which `P^b = DX DX^T / (N - 1)`. ETKF and
+  LETKF computed the ensemble-space analysis covariance as
+  `(I + Q^T R^-1 Q)^-1` instead of `((N - 1) I + Q^T R^-1 Q)^-1`, and EnSRF
+  used `R + (H DX)(H DX)^T` instead of `R + (H DX)(H DX)^T / (N - 1)`. Each
+  was therefore the exact square-root filter for `P^b = DX DX^T`: it trusted
+  the observations too much, fitted their noise, and shrank the analysis
+  spread more than the Kalman update does. Measured on a 12-variable problem
+  with 40 members and 5 observations, the analysis mean differed from the
+  Kalman update by about 20 % of the increment. The stochastic EnKF, LEnKF,
+  EnKF-Cholesky, the shrinkage filters and the modified-Cholesky filters
+  carry the factor correctly and are unchanged. **Any result obtained with
+  `etkf`, `letkf` or `ensrf` in 0.6.0 or earlier should be rerun**, and so
+  should any comparison in which one of them was the reference.
+- New `tests/test_kalman_consistency.py`: the three filters must reproduce
+  the Kalman mean and analysis covariance of the sample covariance to 1e-9
+  (LETKF with every local domain equal to the whole state).
+
 ## 0.6.0 (2026-10-12)
 
 **The geophysical models moved out of pyteda.** `QGModel` and `SWEModel` used

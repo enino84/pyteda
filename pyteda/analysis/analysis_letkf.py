@@ -61,13 +61,16 @@ class AnalysisLETKF(Analysis):
 
             projection_onto_ensemble_space = Qi.T @ np.linalg.solve(Ri, Qi)
             Ui, Si, _ = np.linalg.svd(projection_onto_ensemble_space)
-            Pa_ens_invi = Ui @ np.diag(1 / (Si + 1)) @ Ui.T
+            # DXi holds raw deviations, so the local P^b is DXi DXi^T / (N - 1)
+            # and the analysis covariance in ensemble space is
+            # [(N - 1) I + Qi^T Ri^-1 Qi]^-1 (Hunt et al., 2007, eqs. 21, 24).
+            Pa_ens_invi = Ui @ np.diag(1 / (Si + (N - 1))) @ Ui.T
 
             rhsi = Qi.T @ np.linalg.solve(Ri, di)
             dxai = DXi @ Pa_ens_invi @ rhsi
             xai = xbi + dxai
 
-            Pat_sqrti = Ui @ np.diag(np.sqrt(1 / (Si + 1))) @ Ui.T
+            Pat_sqrti = Ui @ np.diag(np.sqrt((N - 1) / (Si + (N - 1)))) @ Ui.T
 
             """
             Pat = I - V.T @ np.linalg.solve(IN, V)
